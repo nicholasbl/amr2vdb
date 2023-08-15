@@ -16,8 +16,6 @@ project(
     LANGUAGES C CXX
 )
 
-enable_language(Fortran)
-
 # we need fortran for AMReX data services. Don't ask me why.
 
 # hack for clangd
