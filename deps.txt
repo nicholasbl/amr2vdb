@@ -1,0 +1,84 @@
+- boost
+type : boost
+src  : https://boostorg.jfrog.io/artifactory/main/release/1.83.0/source/boost_1_83_0.tar.bz2
+options :
+    cxxflags="-std=c++11"
+    link=static
+    --without-python
+    
+- tbb
+type : cmake
+src  : https://github.com/oneapi-src/oneTBB/archive/refs/tags/v2021.10.0.tar.gz
+options :
+    TBB_TEST OFF
+    TBB4PY_BUILD OFF
+    TBB_INSTALL_VARS ON
+    BUILD_SHARED_LIBS OFF
+    
+- cblosc
+type : cmake
+src  : https://github.com/Blosc/c-blosc/archive/refs/tags/v1.21.1.tar.gz
+options :
+    BUILD_TESTS OFF
+    BUILD_FUZZERS OFF
+    BUILD_SHARED OFF
+    BUILD_BENCHMARKS OFF
+    
+- zlib
+type : cmake
+src  : https://github.com/madler/zlib/releases/download/v1.2.13/zlib-1.2.13.tar.gz
+options :
+    BUILD_SHARED_LIBS OFF
+    
+- zstd
+type : cmake
+src  : https://github.com/facebook/zstd/archive/refs/tags/v1.5.0.tar.gz
+options :
+    ZSTD_BUILD_PROGRAMS OFF
+    ZSTD_BUILD_TESTS OFF
+    ZSTD_BUILD_SHARED OFF
+    
+- openvdb
+type : cmake
+src  : https://github.com/AcademySoftwareFoundation/openvdb/archive/refs/tags/v10.0.1.tar.gz
+options :
+    USE_BLOSC ON
+    USE_ZLIB ON
+    USE_IMATH_HALF OFF
+    OPENVDB_CORE_SHARED OFF
+    OPENVDB_BUILD_BINARIES OFF
+    Boost_USE_STATIC_LIBS  ON
+
+options+!arm64 :
+    OPENVDB_SIMD SSE42
+
+- sundials
+type : cmake
+src : https://github.com/LLNL/sundials/releases/download/v6.6.0/sundials-6.6.0.tar.gz
+options :
+    BUILD_ARKODE ON
+    BUILD_CVODE  ON
+    BUILD_CVODES ON
+    BUILD_EXAMPLES OFF
+    BUILD_IDA OFF
+    BUILD_IDAS OFF
+    BUILD_KINSOL OFF
+    BUILD_SHARED_LIBS OFF
+
+- amrex
+type : cmake
+src : https://github.com/AMReX-Codes/amrex/releases/download/23.08/amrex-23.08.tar.gz
+options :
+    AMReX_BUILD_SHARED_LIBS OFF
+    AMReX_SPACEDIM 3
+    AMReX_PIC TRUE
+    AMReX_MPI FALSE
+    AMReX_SUNDIALS TRUE
+
+- pelephysics
+type : cmake
+src  : https://github.com/nicholasbl/PelePhysics/archive/refs/heads/development.zip
+options :
+    PELEPHYSICS_REACTIONS OFF
+    PELEPHYSICS_EOS ON
+    PELEPHYSICS_TRANSPORT ON
