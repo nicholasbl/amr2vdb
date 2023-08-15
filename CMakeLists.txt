@@ -68,8 +68,13 @@ target_include_directories(amr2vdc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_par
 
 find_package(AMReX REQUIRED)
 find_package(PelePhysics REQUIRED)
+find_package(OpenVDB REQUIRED)
 
-target_link_libraries(amr2vdc PRIVATE AMReX::amrex_3d PelePhysics::PelePhysics-drm19-Fuego-Simple)
+target_link_libraries(amr2vdc PRIVATE
+    AMReX::amrex_3d
+    PelePhysics::PelePhysics-drm19-Fuego-Simple
+    TBB::tbb OpenVDB::openvdb
+)
 
 
 

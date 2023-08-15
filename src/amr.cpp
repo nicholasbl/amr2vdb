@@ -13,6 +13,7 @@
 #include <openvdb/tools/MultiResGrid.h>
 
 #include <array>
+#include <span>
 
 struct LPlt : public pele::physics::pltfilemanager::PltFileManager {
 public:
@@ -27,13 +28,18 @@ public:
 
 void loop_box(amrex::Box const&                       bx,
               amrex::Array4<amrex::Real const> const& a,
-              openvdb::FloatGrid::Accessor const&     accessor) {
+              std::span<openvdb::FloatGrid::Accessor> accessors,
+              std::span<int const>                    var_indices) {
     const auto lo = lbound(bx);
     const auto hi = ubound(bx);
     for (int k = lo.z; k <= hi.z; ++k) {
         for (int j = lo.y; j <= hi.y; ++j) {
             for (int i = lo.x; i <= hi.x; ++i) {
-                float value = a(i, j, k);
+
+                for (auto index : var_indices) {
+                    accessors[index].setValue({ i, j, k },
+                                              a.ptr(i, j, k)[index]);
+                }
             }
         }
     }
@@ -106,7 +112,7 @@ struct AMRState {
         return true;
     }
 
-    void write_to_vdbs() const {
+    std::vector<SampledGrid> write_to_vdbs() const {
         auto geom = plt_data->getGeom(config.max_level);
 
         auto domain = geom.Domain();
@@ -124,6 +130,7 @@ struct AMRState {
         std::cout << "Vars:     " << plt_data->getVariableList().size()
                   << std::endl;
 
+        // Index by variable id
         std::vector<FloatMultiGrid::Ptr> vdb_grids;
 
         for (size_t i = 0; i < var_ids.size(); i++) {
@@ -132,13 +139,31 @@ struct AMRState {
         }
 
 
-        for (int i = 0; i < config.max_level; i++) {
-            auto vdb_grid     = openvdb::FloatGrid::create();
-            auto vdb_accessor = vdb_grid->getAccessor();
+        // note the <= here
+        for (int current_level = 0; current_level <= config.max_level;
+             current_level++) {
+            std::cout << "Working on level " << current_level << std::endl;
+            // for each level, get each vars grid
+            std::vector<FloatGridPtr>        per_var_grid;
+            std::vector<FloatGrid::Accessor> per_var_accessor;
 
-            auto const& ba = plt_data->getGrid(i);
+            // also note that VDB does inverse sampling. 0 is the finest.
+            // so we want to map, say 3 -> 0 and 0 -> 3
 
-            auto const& mf = plt_data->get_data(i);
+            size_t vdb_res = (config.max_level - current_level);
+
+            std::cout << "Mapping to VDB level " << vdb_res << std::endl;
+
+            for (auto& mg : vdb_grids) {
+                // MAGIC 1 here is for trilinear sampling
+
+                per_var_grid.push_back(mg->createGrid<1>(vdb_res));
+                per_var_accessor.push_back(per_var_grid.back()->getAccessor());
+            }
+
+            auto const& ba = plt_data->getGrid(current_level);
+
+            auto const& mf = plt_data->get_data(current_level);
 
             std::cout << "Count of mf: " << mf.size() << std::endl;
 
@@ -151,10 +176,18 @@ struct AMRState {
 
                 auto const& a = fab.array();
 
-                loop_box(box, a, vdb_accessor);
+                loop_box(box, a, per_var_accessor, var_ids);
             }
         }
-        std::cout << "\n";
+
+        std::cout << "Sampling complete" << std::endl;
+
+        std::vector<SampledGrid> ret;
+
+        for (int i = 0; i < vdb_grids.size(); i++) {
+            ret.emplace_back(SampledGrid { var_names[i], vdb_grids[i] });
+        }
+        return ret;
     }
 
     ~AMRState() { amrex::Finalize(amr); }
@@ -170,6 +203,6 @@ std::shared_ptr<AMRState> load_file(std::filesystem::path path,
 }
 
 
-void write_to_vdbs(AMRState const& state) {
-    state.write_to_vdbs();
+std::vector<SampledGrid> write_to_vdbs(AMRState const& state) {
+    return state.write_to_vdbs();
 }

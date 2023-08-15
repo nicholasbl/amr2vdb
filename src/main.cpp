@@ -12,7 +12,8 @@ int main(int argc, char** argv) {
 
     std::string home = std::getenv("HOME");
 
-    std::string target = home + "/Downloads/plt07400";
+    // std::string target = home + "/Downloads/plt07400";
+    std::string target = "/Volumes/LocalStore/plt07400";
     if (arguments.size() > 1) { target = arguments.at(1); }
 
     auto amr = load_file(target, Config {});
