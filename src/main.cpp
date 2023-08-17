@@ -1,22 +1,45 @@
-#include "amr.h"
+#include "volume.h"
 
-#include "config.h"
+#include "argparse.h"
 
 #include <cstdlib>
 #include <iostream>
 #include <string>
 #include <vector>
 
+#include <boost/algorithm/string/replace.hpp>
+
+
 int main(int argc, char** argv) {
-    std::vector<std::string> arguments = { argv, argv + argc };
+    if (argc <= 1) return EXIT_FAILURE;
 
-    std::string home = std::getenv("HOME");
+    std::vector<std::string> arguments = { argv + 1, argv + argc };
 
-    // std::string target = home + "/Downloads/plt07400";
-    std::string target = "/Volumes/LocalStore/plt07400";
-    if (arguments.size() > 1) { target = arguments.at(1); }
+    if (arguments.empty()) return EXIT_FAILURE;
 
-    auto amr = load_file(target, Config {});
+    Arguments args;
 
-    write_to_vdbs(*amr);
+    bool        need_flag = false;
+    std::string last_key;
+    for (auto& str : arguments) {
+        if (need_flag) {
+            assert(last_key.size());
+            args.flags[last_key].push_back(std::move(str));
+            need_flag = false;
+            continue;
+        }
+
+        if (str.starts_with("--")) {
+            need_flag = true;
+            boost::algorithm::replace_all(str, "-", "");
+            last_key = std::move(str);
+            continue;
+        }
+
+        args.positional.push_back(std::move(str));
+    }
+
+    auto command = args.take_first_positional();
+
+    if (command.starts_with("to_vdb")) { amr_to_volume(args); }
 }

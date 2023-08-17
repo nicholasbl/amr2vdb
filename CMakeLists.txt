@@ -66,14 +66,22 @@ target_include_directories(amr2vdc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_par
 
 # Link Deps ====================================================================
 
+
+
 find_package(AMReX REQUIRED)
 find_package(PelePhysics REQUIRED)
+
+set(CMAKE_MODULE_PATH "${THIRD_PARTY_DIR}/lib/cmake/OpenVDB/")
+set(Boost_USE_STATIC_LIBS ON)
 find_package(OpenVDB REQUIRED)
+
+find_library(blosc_lib blosc ${THIRD_PARTY_DIR}/lib)
 
 target_link_libraries(amr2vdc PRIVATE
     AMReX::amrex_3d
     PelePhysics::PelePhysics-drm19-Fuego-Simple
     TBB::tbb OpenVDB::openvdb
+    ${blosc_lib}
 )
 
 
