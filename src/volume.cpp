@@ -313,8 +313,8 @@ FloatGridPtr resample(SampledGrid source, openvdb::BBoxd box) {
     return ret_grid;
 }
 
-void amr_to_volume(Arguments const& c) {
-    if (c.positional.size() < 3) return;
+int amr_to_volume(Arguments const& c) {
+    if (c.positional.size() < 3) return EXIT_FAILURE;
 
     std::string  source_plt = c.positional.at(0);
     std::string  dest_vdb   = c.positional.at(1);
@@ -340,4 +340,6 @@ void amr_to_volume(Arguments const& c) {
     openvdb::io::File file(dest_vdb);
     file.write(upsampled);
     file.close();
+
+    return EXIT_SUCCESS;
 }

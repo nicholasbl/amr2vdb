@@ -1,6 +1,6 @@
-#include "volume.h"
-
 #include "argparse.h"
+#include "mesh_to_volume.h"
+#include "volume.h"
 
 #include <cstdlib>
 #include <iostream>
@@ -41,5 +41,6 @@ int main(int argc, char** argv) {
 
     auto command = args.take_first_positional();
 
-    if (command.starts_with("to_vdb")) { amr_to_volume(args); }
+    if (command.starts_with("amr")) { return amr_to_volume(args); }
+    if (command.starts_with("mesh")) { return mesh_to_volume(args); }
 }

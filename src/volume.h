@@ -2,4 +2,4 @@
 
 struct Arguments;
 
-void amr_to_volume(Arguments const& c);
+int amr_to_volume(Arguments const& c);
