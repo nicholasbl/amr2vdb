@@ -39,8 +39,19 @@ CPMAddPackage(
 
 # Create BIN ===============================================================
 
-file(GLOB_RECURSE sources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp ${CMAKE_CURRENT_SOURCE_DIR}/src/*.h)
-add_executable(amr2vdc ${sources})
+add_executable(amr2vdc
+    src/amr_common.h
+    src/argparse.h
+    src/lzs3d.h
+    src/main.cpp
+    src/mesh_to_volume.cpp
+    src/mesh_to_volume.h
+    src/tricubic.h
+    src/volume.cpp
+    src/volume.h
+    src/volume2.cpp
+    src/volume2.h
+)
 
 set(BUILD_SHARED_LIBS OFF)
 
@@ -87,7 +98,5 @@ target_link_libraries(amr2vdc PRIVATE
 
 
 # IDE Helpers ==================================================================
-
-GroupSourcesByFolder(amr2vdc)
 
 # Install ======================================================================

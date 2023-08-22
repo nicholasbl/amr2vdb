@@ -1,6 +1,9 @@
 #include "volume.h"
 
+#include "amr_common.h"
 #include "argparse.h"
+#include "lzs3d.h"
+#include "tricubic.h"
 
 #include <AMReX.H>
 #include <AMReX_FArrayBox.H>
@@ -19,15 +22,20 @@
 #include <span>
 
 
-using FloatMultiGrid    = openvdb::tools::MultiResGrid<openvdb::FloatTree>;
-using FloatMultiGridPtr = openvdb::tools::MultiResGrid<openvdb::FloatTree>::Ptr;
-using FloatGrid         = openvdb::FloatGrid;
-using FloatGridPtr      = openvdb::FloatGrid::Ptr;
-
-struct VolumeConfig {
-    int                   max_level = -1;
-    std::set<std::string> variables;
+enum class SampleType {
+    QUAD,
+    LANC,
+    TRIC,
 };
+
+const char* to_string(SampleType type) {
+    switch (type) {
+    case SampleType::QUAD: return "Triquadratic";
+    case SampleType::LANC: return "Lanczos";
+    case SampleType::TRIC: return "Tricubic";
+    }
+}
+
 
 struct SampledGrid {
     std::string       name;
@@ -39,29 +47,10 @@ struct Result {
     std::vector<SampledGrid> grids;
 };
 
-struct LPlt : public pele::physics::pltfilemanager::PltFileManager {
-public:
-    LPlt(std::filesystem::path path)
-        : pele::physics::pltfilemanager::PltFileManager(path) { }
-
-    ~LPlt() { std::cout << "Destroying pltfile state" << std::endl; }
-
-    LPlt(LPlt const&)                  = delete;
-    LPlt const& operator=(LPlt const&) = delete;
-    LPlt(LPlt&&)                       = delete;
-    LPlt const& operator=(LPlt&&)      = delete;
-
-    auto const& all_data() const { return m_data; }
-
-    auto const& get_data(int nlvl) { return m_data.at(nlvl); }
-
-    auto const& get_dmap(int nlvl) { return m_dmaps.at(nlvl); }
-};
-
-void loop_box(amrex::Box const&                       bx,
-              amrex::Array4<amrex::Real const> const& a,
-              std::span<openvdb::FloatGrid::Accessor> accessors,
-              std::span<int const>                    var_indices) {
+static void loop_box(amrex::Box const&                       bx,
+                     amrex::Array4<amrex::Real const> const& a,
+                     std::span<openvdb::FloatGrid::Accessor> accessors,
+                     std::span<int const>                    var_indices) {
 
     const auto lo = lbound(bx);
     const auto hi = ubound(bx);
@@ -86,29 +75,16 @@ void loop_box(amrex::Box const&                       bx,
     }
 }
 
-struct AMRState {
+struct ConversionState {
     VolumeConfig  config;
-    amrex::AMReX* amr;
 
-    std::unique_ptr<LPlt> plt_data;
+    std::unique_ptr<LocalPlotFile> plt_data;
 
     std::vector<std::string> var_names;
     std::vector<int>         var_ids;
 
-    AMRState(VolumeConfig c) : config(c) {
-        // dummy params
-        std::string          exe_name = "amr2vdb";
-        std::array<char*, 1> argv_src = { exe_name.data() };
-        int                  argc     = argv_src.size();
-        char**               argv     = argv_src.data();
+    ConversionState(VolumeConfig c) : config(c) { }
 
-        amr = amrex::Initialize(argc, argv);
-    }
-
-    AMRState(AMRState const&)                  = delete;
-    AMRState const& operator=(AMRState const&) = delete;
-    AMRState(AMRState&&)                       = delete;
-    AMRState const& operator=(AMRState&&)      = delete;
 
     bool init(std::filesystem::path path) {
         if (!std::filesystem::exists(path)) {
@@ -116,7 +92,7 @@ struct AMRState {
             return false;
         }
 
-        plt_data      = std::make_unique<LPlt>(path);
+        plt_data      = std::make_unique<LocalPlotFile>(path);
         auto plt_vars = plt_data->getVariableList();
         // int  nvars    = plt_vars.size();
 
@@ -267,20 +243,20 @@ struct AMRState {
 
         return ret;
     }
-
-    ~AMRState() { amrex::Finalize(amr); }
 };
 
 
-Result load_file(std::filesystem::path path, VolumeConfig const& c) {
-    auto state = AMRState(c);
+static Result load_file(std::filesystem::path path, VolumeConfig const& c) {
+    auto state = AMRState();
 
-    if (!state.init(path)) { return {}; }
+    auto c_state = ConversionState(c);
 
-    return state.write_to_vdbs();
+    if (!c_state.init(path)) { return {}; }
+
+    return c_state.write_to_vdbs();
 }
 
-FloatGridPtr resample(SampledGrid source, openvdb::BBoxd box) {
+FloatGridPtr resample(SampledGrid source, openvdb::BBoxd box, SampleType type) {
     // create new grid
     auto new_grid =
         std::make_shared<FloatMultiGrid>(source.grid->numLevels(), 0.0f);
@@ -295,8 +271,22 @@ FloatGridPtr resample(SampledGrid source, openvdb::BBoxd box) {
 
         if (level != max_levels - 1) {
             std::cout << "Interpolation " << level << std::endl;
-            openvdb::tools::resampleToMatch<openvdb::tools::QuadraticSampler>(
-                *(new_grid->grid(level + 1)), *(new_grid->grid(level)));
+
+            auto in_grid  = new_grid->grid(level + 1);
+            auto out_grid = new_grid->grid(level);
+
+            switch (type) {
+            case SampleType::QUAD:
+                openvdb::tools::resampleToMatch<
+                    openvdb::tools::QuadraticSampler>(*in_grid, *out_grid);
+                break;
+            case SampleType::LANC:
+                openvdb::tools::resampleToMatch<LZS3D>(*in_grid, *out_grid);
+                break;
+            case SampleType::TRIC:
+                openvdb::tools::resampleToMatch<Tricubic>(*in_grid, *out_grid);
+                break;
+            }
         }
 
         // copy over new data
@@ -328,11 +318,18 @@ int amr_to_volume(Arguments const& c) {
 
     auto amr = load_file(source_plt, config);
 
+    SampleType type = [&] {
+        if (c.flags.contains("lanczos")) return SampleType::LANC;
+        if (c.flags.contains("tricubic")) return SampleType::TRIC;
+        return SampleType::QUAD;
+    }();
+
+    std::cout << "Using sample method " << to_string(type) << std::endl;
 
     openvdb::GridPtrVec upsampled;
 
     for (auto& multires : amr.grids) {
-        auto new_grid = resample(multires, amr.bbox);
+        auto new_grid = resample(multires, amr.bbox, type);
         multires.grid.reset(); // try to minimize mem usage
         upsampled.push_back(new_grid);
     }
