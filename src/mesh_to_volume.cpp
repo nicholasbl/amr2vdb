@@ -346,8 +346,8 @@ void burn_to_vdb(std::span<XMFFile> meshes, fs::path outpath) {
 
         // tf.preScale(10);
 
-        auto grid =
-            openvdb::tools::meshToVolume<openvdb::FloatGrid>(f.mesh, tf);
+        auto grid = openvdb::tools::meshToVolume<openvdb::FloatGrid>(
+            f.mesh, tf, 10, 10, openvdb::tools::UNSIGNED_DISTANCE_FIELD);
 
         grid->setName("surface");
 
