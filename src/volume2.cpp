@@ -147,7 +147,7 @@ static std::optional<Result> load_file(std::filesystem::path path,
     return res;
 }
 
-int amr_to_volume2(Arguments const& c) {
+int flatten_to_vdb(Arguments const& c) {
     std::cout << "Using volume 2...\n";
     if (c.positional.size() < 3) return EXIT_FAILURE;
 

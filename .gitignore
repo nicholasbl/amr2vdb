@@ -32,3 +32,4 @@
 *.app
 .DS_Store
 *.txt.user
+third_party*

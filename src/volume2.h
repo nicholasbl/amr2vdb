@@ -3,4 +3,4 @@
 
 struct Arguments;
 
-int amr_to_volume2(Arguments const& c);
+int flatten_to_vdb(Arguments const& c);

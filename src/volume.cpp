@@ -14,6 +14,7 @@
 
 #include <openvdb/openvdb.h>
 #include <openvdb/tools/Composite.h>
+#include <openvdb/tools/Filter.h>
 #include <openvdb/tools/GridTransformer.h>
 #include <openvdb/tools/MultiResGrid.h>
 
@@ -256,7 +257,47 @@ static Result load_file(std::filesystem::path path, VolumeConfig const& c) {
     return c_state.write_to_vdbs();
 }
 
-FloatGridPtr resample(SampledGrid source, openvdb::BBoxd box, SampleType type) {
+struct ResampleArgs {
+    int blur_radius     = -1;
+    int blur_iterations = 1;
+
+    void blur_fld(FloatGridPtr ptr) const {
+        if (blur_radius <= 0) return;
+
+        std::cout << "Blur radius " << blur_radius << " x" << blur_iterations
+                  << std::endl;
+
+        auto filter = openvdb::tools::Filter(*ptr);
+
+        filter.gaussian(blur_radius, blur_iterations);
+    }
+};
+
+std::vector<FloatGridPtr> make_grids(int level) {
+    std::vector<FloatGridPtr> ret;
+    assert(level > 0);
+
+    for (int i = 0; i < level; i++) {
+        auto g = FloatGrid::create(0.0);
+
+        auto xform = openvdb::math::Transform::createLinearTransform();
+
+        xform->preScale(1 << level);
+
+        g->setTransform(xform);
+
+        ret.push_back(g);
+    }
+
+    return ret;
+}
+
+FloatGridPtr resample(SampledGrid    source,
+                      openvdb::BBoxd box,
+                      SampleType     type,
+                      ResampleArgs   opts) {
+    std::cout << "Flattening to fine grid...\n";
+
     // create new grid
     auto new_grid =
         std::make_shared<FloatMultiGrid>(source.grid->numLevels(), 0.0f);
@@ -268,30 +309,78 @@ FloatGridPtr resample(SampledGrid source, openvdb::BBoxd box, SampleType type) {
     int level      = max_levels;
 
     while (level-- > 0) {
+        std::cout << "Packing " << level << std::endl;
+
+        auto in_grid  = source.grid->grid(level);
+        auto out_grid = new_grid->grid(level);
+
+        std::cout << "In " << in_grid->activeVoxelCount() << std::endl;
 
         if (level != max_levels - 1) {
-            std::cout << "Interpolation " << level << std::endl;
+            auto previous_grid = new_grid->grid(level + 1);
 
-            auto in_grid  = new_grid->grid(level + 1);
-            auto out_grid = new_grid->grid(level);
+            std::cout << "Interpolate " << (level + 1) << " to " << level
+                      << std::endl;
+
+            std::cout << "Previous has " << previous_grid->activeVoxelCount()
+                      << std::endl;
 
             switch (type) {
             case SampleType::QUAD:
                 openvdb::tools::resampleToMatch<
-                    openvdb::tools::QuadraticSampler>(*in_grid, *out_grid);
+                    openvdb::tools::QuadraticSampler>(*previous_grid,
+                                                      *out_grid);
                 break;
             case SampleType::LANC:
-                openvdb::tools::resampleToMatch<LZS3D>(*in_grid, *out_grid);
+                openvdb::tools::resampleToMatch<LZS3D>(*previous_grid,
+                                                       *out_grid);
                 break;
             case SampleType::TRIC:
-                openvdb::tools::resampleToMatch<Tricubic>(*in_grid, *out_grid);
+                openvdb::tools::resampleToMatch<Tricubic>(*previous_grid,
+                                                          *out_grid);
                 break;
             }
+
+            std::cout << "Out prepared with " << out_grid->activeVoxelCount()
+                      << std::endl;
         }
 
+        /*
+        // at end blur
+        if (level == 0 and opts.blur_radius > 0 and opts.blur_iterations >= 1) {
+            std::cout << "Blur radius " << opts.blur_radius << " x"
+                      << opts.blur_iterations << std::endl;
+            auto in_grid = new_grid->grid(level + 1);
+
+            auto filter = openvdb::tools::Filter(*in_grid);
+
+            filter.gaussian(opts.blur_radius, opts.blur_iterations);
+        }
+        */
+
+
         // copy over new data
-        openvdb::tools::compReplace(*new_grid->grid(level),
-                                    *source.grid->grid(level));
+        // openvdb::tools::compReplace(*new_grid->grid(level),
+        //                            *source.grid->grid(level));
+
+        // smoother but overall more shitty.
+        openvdb::tools::resampleToMatch<openvdb::tools::BoxSampler>(
+            *source.grid->grid(level), *out_grid);
+
+        std::cout << "Storing to " << level;
+        std::cout << "Out resampled with " << out_grid->activeVoxelCount()
+                  << std::endl;
+
+
+        if (level != 0) {
+            std::cout << "Blur before " << out_grid->activeVoxelCount()
+                      << std::endl;
+
+            opts.blur_fld(out_grid);
+
+            std::cout << "Blur after " << out_grid->activeVoxelCount()
+                      << std::endl;
+        }
     }
 
     auto ret_grid = new_grid->grid(0);
@@ -326,10 +415,15 @@ int amr_to_volume(Arguments const& c) {
 
     std::cout << "Using sample method " << to_string(type) << std::endl;
 
+    ResampleArgs opts {
+        .blur_radius     = c.get_int_flag("blur", -1),
+        .blur_iterations = c.get_int_flag("blur_iter", 1),
+    };
+
     openvdb::GridPtrVec upsampled;
 
     for (auto& multires : amr.grids) {
-        auto new_grid = resample(multires, amr.bbox, type);
+        auto new_grid = resample(multires, amr.bbox, type, opts);
         multires.grid.reset(); // try to minimize mem usage
         upsampled.push_back(new_grid);
     }

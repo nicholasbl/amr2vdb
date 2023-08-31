@@ -14,4 +14,13 @@ struct Arguments {
         positional.pop_front();
         return ret;
     }
+
+    int get_int_flag(std::string name, int default_value = 0) const {
+        auto iter = flags.find(name);
+        if (iter == flags.end()) return default_value;
+
+        if (iter->second.empty()) return default_value;
+
+        return std::stoi(iter->second.front());
+    }
 };
