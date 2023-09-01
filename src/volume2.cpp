@@ -148,17 +148,17 @@ static std::optional<Result> load_file(std::filesystem::path path,
 }
 
 int flatten_to_vdb(Arguments const& c) {
-    std::cout << "Using volume 2...\n";
-    if (c.positional.size() < 3) return EXIT_FAILURE;
-
-    std::string  source_plt = c.positional.at(0);
-    std::string  dest_vdb   = c.positional.at(1);
+    std::cout << "Using AMR flattening approach...\n";
+    std::string  source_plt = toml::find<std::string>(c.root, "input");
+    std::string  dest_vdb   = toml::find<std::string>(c.root, "output");
     VolumeConfig config;
 
+    auto amr_config_node = toml::find(c.root, "flatten");
 
-    for (auto iter = c.positional.begin() + 2; iter != c.positional.end();
-         ++iter) {
-        config.variables.insert(*iter);
+    auto source_vars = toml::find(amr_config_node, "variables").as_array();
+
+    for (auto const& var : source_vars) {
+        config.variables.insert(var.as_string());
     }
 
     auto amr = load_file(source_plt, config);

@@ -82,3 +82,9 @@ options :
     PELEPHYSICS_REACTIONS OFF
     PELEPHYSICS_EOS ON
     PELEPHYSICS_TRANSPORT ON
+
+- toml
+type : cmake
+src  : https://github.com/ToruNiina/toml11/archive/refs/tags/v3.7.1.tar.gz
+options :
+    CMAKE_CXX_STANDARD 11

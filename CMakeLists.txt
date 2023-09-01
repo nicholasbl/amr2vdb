@@ -51,6 +51,8 @@ add_executable(amr2vdc
     src/volume.h
     src/volume2.cpp
     src/volume2.h
+    src/postprocess.h src/postprocess.cpp
+    src/argparse.cpp
 )
 
 set(BUILD_SHARED_LIBS OFF)

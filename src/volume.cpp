@@ -3,6 +3,7 @@
 #include "amr_common.h"
 #include "argparse.h"
 #include "lzs3d.h"
+#include "postprocess.h"
 #include "tricubic.h"
 
 #include <AMReX.H>
@@ -257,8 +258,15 @@ static Result load_file(std::filesystem::path path, VolumeConfig const& c) {
     return c_state.write_to_vdbs();
 }
 
-struct ResampleArgs {
-    int blur_radius     = -1;
+struct BlurArgs {
+    enum Strat {
+        NO_BLUR,
+        BLUR_AFTER_EVERY_LEVEL,
+        BLUR_AFTER_LAST_LEVEL,
+        BLUR_AT_END,
+    } strategy = NO_BLUR;
+
+    int blur_radius     = 1;
     int blur_iterations = 1;
 
     void blur_fld(FloatGridPtr ptr) const {
@@ -269,7 +277,26 @@ struct ResampleArgs {
 
         auto filter = openvdb::tools::Filter(*ptr);
 
-        filter.gaussian(blur_radius, blur_iterations);
+        // filter.gaussian(blur_radius, blur_iterations);
+        filter.mean(blur_radius, blur_iterations);
+    }
+
+    static Strat string_to_strat(std::string text) {
+        static std::unordered_map<std::string, Strat> mapper = {
+            { "after_every", BLUR_AFTER_EVERY_LEVEL },
+            { "after_last", BLUR_AFTER_LAST_LEVEL },
+            { "at_end", BLUR_AT_END },
+        };
+
+        for (auto& c : text) {
+            c = std::tolower(c);
+        }
+
+        if (auto iter = mapper.find(text); iter != mapper.end()) {
+            return iter->second;
+        }
+
+        return NO_BLUR;
     }
 };
 
@@ -282,7 +309,7 @@ std::vector<FloatGridPtr> make_grids(int level) {
 
         auto xform = openvdb::math::Transform::createLinearTransform();
 
-        xform->preScale(1 << level);
+        if (level > 0) xform->preScale(1 << i);
 
         g->setTransform(xform);
 
@@ -295,29 +322,26 @@ std::vector<FloatGridPtr> make_grids(int level) {
 FloatGridPtr resample(SampledGrid    source,
                       openvdb::BBoxd box,
                       SampleType     type,
-                      ResampleArgs   opts) {
+                      BlurArgs       opts) {
     std::cout << "Flattening to fine grid...\n";
 
-    // create new grid
-    auto new_grid =
-        std::make_shared<FloatMultiGrid>(source.grid->numLevels(), 0.0f);
-    new_grid->setName(source.name);
-
     // interpolate from coarse to fine to this grid
-
     int max_levels = source.grid->numLevels();
     int level      = max_levels;
+
+    // create new grid
+    auto new_multi_grid = make_grids(max_levels);
 
     while (level-- > 0) {
         std::cout << "Packing " << level << std::endl;
 
         auto in_grid  = source.grid->grid(level);
-        auto out_grid = new_grid->grid(level);
+        auto out_grid = new_multi_grid.at(level);
 
         std::cout << "In " << in_grid->activeVoxelCount() << std::endl;
 
         if (level != max_levels - 1) {
-            auto previous_grid = new_grid->grid(level + 1);
+            auto previous_grid = new_multi_grid.at(level + 1);
 
             std::cout << "Interpolate " << (level + 1) << " to " << level
                       << std::endl;
@@ -360,30 +384,29 @@ FloatGridPtr resample(SampledGrid    source,
 
 
         // copy over new data
-        // openvdb::tools::compReplace(*new_grid->grid(level),
-        //                            *source.grid->grid(level));
+        openvdb::tools::compReplace(*out_grid, *source.grid->grid(level));
 
         // smoother but overall more shitty.
-        openvdb::tools::resampleToMatch<openvdb::tools::BoxSampler>(
-            *source.grid->grid(level), *out_grid);
+        //        openvdb::tools::resampleToMatch<openvdb::tools::BoxSampler>(
+        //            *source.grid->grid(level), *out_grid);
 
-        std::cout << "Storing to " << level;
+        std::cout << "Storing to " << level << std::endl;
         std::cout << "Out resampled with " << out_grid->activeVoxelCount()
                   << std::endl;
 
 
-        if (level != 0) {
-            std::cout << "Blur before " << out_grid->activeVoxelCount()
-                      << std::endl;
+        if (level != 0 and opts.strategy == BlurArgs::BLUR_AFTER_EVERY_LEVEL) {
 
             opts.blur_fld(out_grid);
-
-            std::cout << "Blur after " << out_grid->activeVoxelCount()
-                      << std::endl;
+        } else if (level == 1 and
+                   opts.strategy == BlurArgs::BLUR_AFTER_LAST_LEVEL) {
+            opts.blur_fld(out_grid);
         }
     }
 
-    auto ret_grid = new_grid->grid(0);
+    auto ret_grid = new_multi_grid.at(0);
+
+    if (opts.strategy == BlurArgs::BLUR_AT_END) { opts.blur_fld(ret_grid); }
 
     std::cout << "Final " << ret_grid->activeVoxelCount() << std::endl;
 
@@ -393,43 +416,65 @@ FloatGridPtr resample(SampledGrid    source,
 }
 
 int amr_to_volume(Arguments const& c) {
-    if (c.positional.size() < 3) return EXIT_FAILURE;
+    std::string source_plt = toml::find<std::string>(c.root, "input");
+    std::string dest_vdb   = toml::find<std::string>(c.root, "output");
 
-    std::string  source_plt = c.positional.at(0);
-    std::string  dest_vdb   = c.positional.at(1);
+    auto amr_config_node = toml::find(c.root, "amr");
+
     VolumeConfig config;
 
+    auto source_vars = toml::find(amr_config_node, "variables").as_array();
 
-    for (auto iter = c.positional.begin() + 2; iter != c.positional.end();
-         ++iter) {
-        config.variables.insert(*iter);
+    for (auto const& var : source_vars) {
+        config.variables.insert(var.as_string());
     }
 
     auto amr = load_file(source_plt, config);
 
+    auto sample_type =
+        toml::find_or<std::string>(amr_config_node, "sample", "triquad");
+
     SampleType type = [&] {
-        if (c.flags.contains("lanczos")) return SampleType::LANC;
-        if (c.flags.contains("tricubic")) return SampleType::TRIC;
+        if (sample_type == "lanczos") return SampleType::LANC;
+        if (sample_type == "tricubic") return SampleType::TRIC;
         return SampleType::QUAD;
     }();
 
     std::cout << "Using sample method " << to_string(type) << std::endl;
 
-    ResampleArgs opts {
-        .blur_radius     = c.get_int_flag("blur", -1),
-        .blur_iterations = c.get_int_flag("blur_iter", 1),
+    auto blur_config_node =
+        toml::find_or(amr_config_node, "blur", toml::value());
+
+    BlurArgs opts {
+        .strategy = BlurArgs::string_to_strat(
+            toml::find_or(blur_config_node, "strategy", "none")),
+        .blur_radius = toml::find_or<int>(blur_config_node, "radius", -1),
+        .blur_iterations =
+            toml::find_or<int>(blur_config_node, "iterations", 0),
     };
 
-    openvdb::GridPtrVec upsampled;
+    GridMap completed;
 
     for (auto& multires : amr.grids) {
         auto new_grid = resample(multires, amr.bbox, type, opts);
         multires.grid.reset(); // try to minimize mem usage
-        upsampled.push_back(new_grid);
+        completed[new_grid->getName()] = new_grid;
+    }
+
+    if (c.root.contains("post")) {
+        postprocess(PostProcessOptions::from_toml(c.root), completed);
+    }
+
+    openvdb::GridPtrVec to_save;
+
+    {
+        for (auto const& [k, v] : completed) {
+            to_save.push_back(v);
+        }
     }
 
     openvdb::io::File file(dest_vdb);
-    file.write(upsampled);
+    file.write(to_save);
     file.close();
 
     return EXIT_SUCCESS;

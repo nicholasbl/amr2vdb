@@ -390,9 +390,8 @@ int import_xmf(fs::path path, fs::path outpath) {
 }
 
 int mesh_to_volume(Arguments& c) {
-    auto fname = fs::path(c.take_first_positional());
-
-    auto outname = c.take_first_positional();
+    auto fname   = fs::path(toml::find<std::string>(c.root, "input"));
+    auto outname = fs::path(toml::find<std::string>(c.root, "output"));
 
     if (fname.extension() == ".xmf" or fname.extension() == ".xdmf") {
         return import_xmf(fname, outname);
