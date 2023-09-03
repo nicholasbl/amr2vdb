@@ -14,6 +14,7 @@ options :
     TBB4PY_BUILD OFF
     TBB_INSTALL_VARS ON
     BUILD_SHARED_LIBS OFF
+    TBB_STRICT OFF
     
 - cblosc
 type : cmake

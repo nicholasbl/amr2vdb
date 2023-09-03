@@ -10,6 +10,8 @@
 
 #include <PltFileManager.H>
 
+#include <optional>
+
 
 struct Result {
     // openvdb::BBoxd           bbox;

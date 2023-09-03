@@ -114,27 +114,55 @@ GridPtr take_grid_by_name(std::string_view pattern, GridMap& grids) {
 openvdb::BoolGrid::Ptr
 extract_mask(FloatGridPtr                       vfrac_grid,
              PostProcessOptions::PPVFrac const& vfrac_info) {
+    std::cout << "Extracting mask...\n";
 
-    auto copy_vfrac = openvdb::deepCopyTypedGrid<FloatGrid>(*vfrac_grid);
+    auto ret = openvdb::BoolGrid::create();
 
-    // we use a roundabout way to select the parts we want. we deactivate the
-    // parts that not desired
+    auto xfrmr_keep_lt = [&](FloatGrid::ValueOnCIter const& iter,
+                             openvdb::BoolGrid::Accessor&   accessor) {
+        auto value = *iter;
 
-    constexpr float tolerance = 2.0;
+        auto out_value = (value <= vfrac_info.value);
 
-    float at = vfrac_info.value;
+        if (iter.isVoxelValue()) {
+            accessor.setValue(iter.getCoord(), out_value);
+        } else {
+            openvdb::CoordBBox bbox;
+            iter.getBoundingBox(bbox);
+            accessor.getTree()->fill(bbox, out_value);
+        }
+    };
+
+    auto xfrmr_keep_gt = [&](FloatGrid::ValueOnCIter const& iter,
+                             openvdb::BoolGrid::Accessor&   accessor) {
+        auto value = *iter;
+
+        auto out_value = (value >= vfrac_info.value);
+
+        if (iter.isVoxelValue()) {
+            accessor.setValue(iter.getCoord(), out_value);
+        } else {
+            openvdb::CoordBBox bbox;
+            iter.getBoundingBox(bbox);
+            accessor.getTree()->fill(bbox, out_value);
+        }
+    };
 
     if (vfrac_info.keep_above_value) {
-        at += tolerance / 2;
+        openvdb::tools::transformValues(
+            vfrac_grid->cbeginValueOn(), *ret, xfrmr_keep_gt);
     } else {
-        at -= tolerance / 2;
+        openvdb::tools::transformValues(
+            vfrac_grid->cbeginValueOn(), *ret, xfrmr_keep_lt);
     }
 
-    openvdb::tools::deactivate(*copy_vfrac, at, tolerance);
+    openvdb::tools::deactivate(*ret, false);
+
+    openvdb::tools::pruneInactive(ret->tree());
 
     // create mask from active values
 
-    return openvdb::tools::interiorMask(*copy_vfrac);
+    return ret;
 }
 
 template <class GridType>
@@ -156,9 +184,13 @@ void trim_all_vfrac(PostProcessOptions::PPVFrac vfrac_info, GridMap& grids) {
         return;
     }
 
+    std::cout << "Found grid " << grid->getName() << " for trimming\n";
+
     // to compute the mask, we first take a copy of the vfrac grid
 
     auto mask = extract_mask(cast_to<FloatGrid>(grid), vfrac_info);
+
+    std::cout << "Trimming fields...\n";
 
     for (auto& [k, v] : grids) {
         if (v == grid) continue;
@@ -169,9 +201,31 @@ void trim_all_vfrac(PostProcessOptions::PPVFrac vfrac_info, GridMap& grids) {
     }
 }
 
-static openvdb::Vec3fGrid::Ptr scalar_to_vector(FloatGridPtr&& grid) {
+using Vec2fGrid = openvdb::Grid<openvdb::Vec2STree>;
+
+static Vec2fGrid::Ptr scalar_to_vector2(FloatGridPtr&& grid) {
     auto op = [](openvdb::FloatGrid::ValueOnCIter const& iter, auto& accessor) {
-        auto value = openvdb::Vec3f(iter);
+        auto value = openvdb::Vec2f(*iter);
+
+        if (iter.isVoxelValue()) {
+            accessor.setValue(iter.getCoord(), value);
+        } else {
+            openvdb::CoordBBox bbox;
+            iter.getBoundingBox(bbox);
+            accessor.getTree()->fill(bbox, value);
+        }
+    };
+
+    auto ret = Vec2fGrid::create();
+
+    openvdb::tools::transformValues(grid->cbeginValueOn(), *ret, op);
+
+    return ret;
+}
+
+static openvdb::Vec3fGrid::Ptr scalar_to_vector3(FloatGridPtr&& grid) {
+    auto op = [](openvdb::FloatGrid::ValueOnCIter const& iter, auto& accessor) {
+        auto value = openvdb::Vec3f(*iter);
 
         if (iter.isVoxelValue()) {
             accessor.setValue(iter.getCoord(), value);
@@ -198,13 +252,13 @@ void merge_velocity(PostProcessOptions::PPVelName const& names,
 
     if (!vx or !vy or !vz) return;
 
-    auto upgrade_x = scalar_to_vector(std::move(vx));
-    auto upgrade_y = scalar_to_vector(std::move(vy));
+    auto upgrade_x = scalar_to_vector3(std::move(vx));
+    auto upgrade_y = scalar_to_vector3(std::move(vy));
 
     auto combiner = [](openvdb::Vec3f const& a,
                        openvdb::Vec3f const& b,
                        openvdb::Vec3f&       result) {
-        result = openvdb::Vec3f(a.x(), b.y(), 0);
+        result = openvdb::Vec3f(a.x(), b.x(), 1);
     };
 
     std::cout << "Adding x + y...\n";
@@ -215,12 +269,12 @@ void merge_velocity(PostProcessOptions::PPVelName const& names,
 
     // y should be empty, x should have partial results. now get z
 
-    auto upgrade_z = scalar_to_vector(std::move(vz));
+    auto upgrade_z = scalar_to_vector3(std::move(vz));
 
-    auto final_combiner = [](openvdb::Vec3f const& a,
-                             openvdb::Vec3f const& b,
+    auto final_combiner = [](openvdb::Vec3f const& xy,
+                             openvdb::Vec3f const& z,
                              openvdb::Vec3f&       result) {
-        result = openvdb::Vec3f(a.x(), a.y(), b.z());
+        result = openvdb::Vec3f(xy.x(), xy.y(), z.x());
     };
 
     std::cout << "Adding xy + z...\n";
@@ -229,6 +283,7 @@ void merge_velocity(PostProcessOptions::PPVelName const& names,
     auto new_grid_name = "velocity";
 
     upgrade_x->setName(new_grid_name);
+    upgrade_x->setVectorType(openvdb::VecType::VEC_CONTRAVARIANT_RELATIVE);
 
     grids[new_grid_name] = upgrade_x;
 }
@@ -276,26 +331,20 @@ PostProcessOptions PostProcessOptions::from_toml(toml::value const& root) {
     if (node.contains("trim")) {
         auto trim_node = toml::find(node, "trim");
 
-        bool gt = trim_node.contains("greater");
-        bool lt = trim_node.contains("less");
+        bool keep_above = false;
 
-        bool keep = true;
-
-        // not sure about these defaults
-        if (gt and lt) {
-            keep = true;
-        } else if (gt and !lt) {
-            keep = true;
-        } else if (!gt and lt) {
-            keep = false;
-        } else {
-            keep = true;
+        if (trim_node.contains("greater")) {
+            auto val   = toml::find<bool>(trim_node, "greater");
+            keep_above = val;
+        } else if (trim_node.contains("less")) {
+            auto val   = toml::find<bool>(trim_node, "less");
+            keep_above = !val;
         }
 
         PPVFrac trim_info {
-            .name             = toml::find_or(trim_node, "variable", "v?frac"),
+            .name             = toml::find_or(trim_node, "variable", "v*frac"),
             .value            = toml::find_or<float>(trim_node, "value", .5),
-            .keep_above_value = keep,
+            .keep_above_value = keep_above,
         };
 
         ret.trim_vfrac = trim_info;

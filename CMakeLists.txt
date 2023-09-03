@@ -84,7 +84,8 @@ target_include_directories(amr2vdc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_par
 find_package(AMReX REQUIRED)
 find_package(PelePhysics REQUIRED)
 
-set(CMAKE_MODULE_PATH "${THIRD_PARTY_DIR}/lib/cmake/OpenVDB/")
+list(PREPEND CMAKE_MODULE_PATH "${THIRD_PARTY_DIR}/lib/cmake/OpenVDB/")
+list(PREPEND CMAKE_MODULE_PATH "${THIRD_PARTY_DIR}/lib64/cmake/OpenVDB/")
 set(Boost_USE_STATIC_LIBS ON)
 find_package(OpenVDB REQUIRED)
 

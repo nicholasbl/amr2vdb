@@ -369,19 +369,6 @@ FloatGridPtr resample(SampledGrid    source,
                       << std::endl;
         }
 
-        /*
-        // at end blur
-        if (level == 0 and opts.blur_radius > 0 and opts.blur_iterations >= 1) {
-            std::cout << "Blur radius " << opts.blur_radius << " x"
-                      << opts.blur_iterations << std::endl;
-            auto in_grid = new_grid->grid(level + 1);
-
-            auto filter = openvdb::tools::Filter(*in_grid);
-
-            filter.gaussian(opts.blur_radius, opts.blur_iterations);
-        }
-        */
-
 
         // copy over new data
         openvdb::tools::compReplace(*out_grid, *source.grid->grid(level));
@@ -412,6 +399,10 @@ FloatGridPtr resample(SampledGrid    source,
 
     ret_grid->clipGrid(box);
     ret_grid->setName(source.name);
+    ret_grid->setGridClass(openvdb::GridClass::GRID_FOG_VOLUME);
+
+    openvdb::tools::prune(ret_grid->tree());
+
     return ret_grid;
 }
 

@@ -7,6 +7,7 @@
 #include <openvdb/tools/GridTransformer.h>
 #include <openvdb/tools/MultiResGrid.h>
 
+#include <filesystem>
 #include <memory>
 
 using FloatMultiGrid    = openvdb::tools::MultiResGrid<openvdb::FloatTree>;
