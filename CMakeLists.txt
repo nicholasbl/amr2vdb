@@ -39,7 +39,7 @@ CPMAddPackage(
 
 # Create BIN ===============================================================
 
-add_executable(amr2vdc
+add_executable(amr2vdb
     src/amr_common.h
     src/argparse.h
     src/lzs3d.h
@@ -57,24 +57,24 @@ add_executable(amr2vdc
 
 set(BUILD_SHARED_LIBS OFF)
 
-set_target_properties(amr2vdc PROPERTIES CXX_STANDARD 20)
+set_target_properties(amr2vdb PROPERTIES CXX_STANDARD 20)
 
 if (CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
     set (X86 TRUE)
-    target_compile_options(amr2vdc PUBLIC -mavx)
+    target_compile_options(amr2vdb PUBLIC -mavx)
 else ()
     set (X86 FALSE)
 endif ()
 
-target_compile_options(amr2vdc PUBLIC -fsanitize=address)
-target_link_options(amr2vdc PUBLIC  -fsanitize=address)
+target_compile_options(amr2vdb PUBLIC -fsanitize=address)
+target_link_options(amr2vdb PUBLIC  -fsanitize=address)
 
 # Source Files =================================================================
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
-target_include_directories(amr2vdc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_include_directories(amr2vdc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/include/)
+target_include_directories(amr2vdb PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(amr2vdb PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/include/)
 
 
 # Link Deps ====================================================================
@@ -91,7 +91,7 @@ find_package(OpenVDB REQUIRED)
 
 find_library(blosc_lib blosc ${THIRD_PARTY_DIR}/lib)
 
-target_link_libraries(amr2vdc PRIVATE
+target_link_libraries(amr2vdb PRIVATE
     AMReX::amrex_3d
     PelePhysics::PelePhysics-drm19-Fuego-Simple
     TBB::tbb OpenVDB::openvdb
