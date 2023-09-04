@@ -36,6 +36,7 @@ const char* to_string(SampleType type) {
     case SampleType::LANC: return "Lanczos";
     case SampleType::TRIC: return "Tricubic";
     }
+    __builtin_unreachable();
 }
 
 
