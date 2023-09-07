@@ -488,6 +488,7 @@ void add_in_mag_grad_density(std::string density_name, GridMap& grids) {
 // }
 
 void crunch_qcrit(Mat3Grid::Ptr jac, GridMap& grids) {
+    spdlog::debug("Computing qcrit quantity...");
     auto fld = convert<FloatGrid>(jac, [](Mat3 const& m) {
         return -(m[0] * m[0] + m[4] * m[4] + m[8] * m[8]) / 2. -
                (m[1] * m[3] + m[2] * m[6] + m[5] * m[7]);
@@ -505,11 +506,13 @@ void qcrit_1d_vel(std::string vx,
                   std::string vy,
                   std::string vz,
                   GridMap&    grids) {
+    spdlog::debug("Gathering velocity flds...");
     // get all
     auto vx_grid = cast_to<openvdb::FloatGrid>(find_grid_by_name(vx, grids));
     auto vy_grid = cast_to<openvdb::FloatGrid>(find_grid_by_name(vy, grids));
     auto vz_grid = cast_to<openvdb::FloatGrid>(find_grid_by_name(vz, grids));
 
+    spdlog::debug("Grad x and y...");
     // compute gradients of each
     auto gx = openvdb::tools::gradient(*vx_grid);
     auto gy = openvdb::tools::gradient(*vy_grid);
@@ -545,7 +548,7 @@ void qcrit_1d_vel(std::string vx,
     auto upgraded_gy = grad_to_v6(std::move(gy));
 
     // now combine
-
+    spdlog::debug("Merge x and y...");
     upgraded_gx->tree().combine(upgraded_gy->tree(),
                                 [](Vec6 const& a, Vec6 const& b, Vec6& result) {
                                     result = Vec6 {
@@ -557,6 +560,7 @@ void qcrit_1d_vel(std::string vx,
     upgraded_gy = nullptr;
 
     // and now for z
+    spdlog::debug("Grad z...");
     auto gz = openvdb::tools::gradient(*vz_grid);
 
     auto upgraded_gz = convert<Mat3Grid>(std::move(gz), [](openvdb::Vec3f v) {
@@ -579,6 +583,7 @@ void qcrit_1d_vel(std::string vx,
 
     // now zip and return
 
+    spdlog::debug("Combine all...");
     result->tree().combine(
         upgraded_gz->tree(), [](Mat3 const& a, Mat3 const& b, Mat3& result) {
             result =
