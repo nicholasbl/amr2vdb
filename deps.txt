@@ -89,3 +89,10 @@ type : cmake
 src  : https://github.com/ToruNiina/toml11/archive/refs/tags/v3.7.1.tar.gz
 options :
     CMAKE_CXX_STANDARD 11
+
+- spdlog
+type : cmake
+src  : https://github.com/gabime/spdlog/archive/refs/tags/v1.12.0.tar.gz
+options :
+    BUILD_SHARED_LIBS OFF
+

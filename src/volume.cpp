@@ -6,6 +6,8 @@
 #include "postprocess.h"
 #include "tricubic.h"
 
+#include "spdlog/spdlog.h"
+
 #include <AMReX.H>
 #include <AMReX_FArrayBox.H>
 #include <AMReX_ParmParse.H>
@@ -91,7 +93,7 @@ struct ConversionState {
 
     bool init(std::filesystem::path path) {
         if (!std::filesystem::exists(path)) {
-            std::cerr << "Path does not exist: " << path << std::endl;
+            spdlog::error("Path does not exist: {}", path.string());
             return false;
         }
 
@@ -105,19 +107,19 @@ struct ConversionState {
 
             for (auto const& vname : config.variables) {
                 if (!extant_names.contains(vname)) {
-                    std::cerr << "Variable " << vname
-                              << " does not exist in pltfile.\n";
+                    spdlog::error("Variable {} does not exist in pltfile.",
+                                  vname);
                     return false;
                 }
             }
         }
 
-        std::cout << "Loading from " << path << std::endl;
+        spdlog::info("Loading from {}", path.string());
 
         for (long i = 0; i < plt_vars.size(); i++) {
             auto const& vname = plt_vars[i];
             if (config.variables.contains(vname)) {
-                std::cout << "Variable " << vname << " at " << i << std::endl;
+                spdlog::info("Variable {} is at index {}", vname, i);
                 var_names.push_back(vname);
                 var_ids.push_back(i);
             }
@@ -128,20 +130,22 @@ struct ConversionState {
         }
 
         if (config.max_level >= plt_data->getNlev()) {
-            std::cerr << "Asking for refinement level " << config.max_level
-                      << " but pltfile only has " << plt_data->getNlev()
-                      << std::endl;
+            spdlog::error(
+                "Asking for refinement level {} but pltfile only has {}",
+                config.max_level,
+                plt_data->getNlev());
             return false;
         }
 
         plt_data->readPlotFileData();
 
-        std::cout << "Done." << std::endl;
+        spdlog::info("Done.");
 
         return true;
     }
 
     Result write_to_vdbs() const {
+        spdlog::info("Extracting AMR to Multires VDB");
         auto geom = plt_data->getGeom(config.max_level);
 
         auto domain = geom.Domain();
@@ -150,14 +154,10 @@ struct ConversionState {
 
         auto grid = amrex::BoxArray(domain);
 
-        std::cout << "Level:    " << config.max_level << std::endl;
-        std::cout << "Domain L: " << larray[0] << " " << larray[1] << " "
-                  << larray[2] << std::endl;
-        std::cout << "Domain H: " << harray[0] << " " << harray[1] << " "
-                  << harray[2] << std::endl;
-
-        std::cout << "Vars:     " << plt_data->getVariableList().size()
-                  << std::endl;
+        spdlog::info("Level:    {}", config.max_level);
+        spdlog::info("Domain L: {} {} {}", larray[0], larray[1], larray[2]);
+        spdlog::info("Domain H: {} {} {}", harray[0], harray[1], harray[2]);
+        spdlog::info("Var Num:  {}", plt_data->getVariableList().size());
 
         std::vector<FloatMultiGrid::Ptr> vdb_grids;
 
@@ -171,14 +171,13 @@ struct ConversionState {
         // note the <= here
         for (int current_level = 0; current_level <= config.max_level;
              current_level++) {
-            std::cout << "Working on level " << current_level << std::endl;
+            spdlog::info("Working on AMR level {}", current_level);
             // also note that VDB does inverse sampling. 0 is the finest.
             // so we want to map, say 3 -> 0 and 0 -> 3
 
             size_t vdb_mapped_level = (config.max_level - current_level);
 
-            std::cout << "Mapping to VDB level " << vdb_mapped_level
-                      << std::endl;
+            spdlog::debug("Mapping to VDB level {}", vdb_mapped_level);
 
             // now check if we have a coarser grid to copy into this one
 
@@ -214,7 +213,7 @@ struct ConversionState {
 
             auto iter = amrex::MFIter(mf);
 
-            std::cout << "Iterating blocks..." << std::endl;
+            spdlog::debug("Iterating blocks...");
 
             for (; iter.isValid(); ++iter) {
                 auto const& box = iter.validbox();
@@ -227,7 +226,7 @@ struct ConversionState {
             }
         }
 
-        std::cout << "Sampling complete" << std::endl;
+        spdlog::info("Sampling complete");
 
         std::vector<SampledGrid> ret_grid;
 
@@ -270,11 +269,19 @@ struct BlurArgs {
     int blur_radius     = 1;
     int blur_iterations = 1;
 
+    static BlurArgs from_toml(toml::value const& val) {
+        return BlurArgs {
+            .strategy = BlurArgs::string_to_strat(
+                toml::find_or(val, "strategy", "none")),
+            .blur_radius     = toml::find_or<int>(val, "radius", -1),
+            .blur_iterations = toml::find_or<int>(val, "iterations", 0),
+        };
+    }
+
     void blur_fld(FloatGridPtr ptr) const {
         if (blur_radius <= 0) return;
 
-        std::cout << "Blur radius " << blur_radius << " x" << blur_iterations
-                  << std::endl;
+        spdlog::info("Blur radius {}x{}", blur_radius, blur_iterations);
 
         auto filter = openvdb::tools::Filter(*ptr);
 
@@ -324,7 +331,7 @@ FloatGridPtr resample(SampledGrid    source,
                       openvdb::BBoxd box,
                       SampleType     type,
                       BlurArgs       opts) {
-    std::cout << "Flattening to fine grid...\n";
+    spdlog::info("Resampling {} to fine grid", source.name);
 
     // interpolate from coarse to fine to this grid
     int max_levels = source.grid->numLevels();
@@ -334,21 +341,19 @@ FloatGridPtr resample(SampledGrid    source,
     auto new_multi_grid = make_grids(max_levels);
 
     while (level-- > 0) {
-        std::cout << "Packing " << level << std::endl;
+        spdlog::info("Packing {}", level);
 
         auto in_grid  = source.grid->grid(level);
         auto out_grid = new_multi_grid.at(level);
 
-        std::cout << "In " << in_grid->activeVoxelCount() << std::endl;
+        spdlog::debug("In {}", in_grid->activeVoxelCount());
 
         if (level != max_levels - 1) {
             auto previous_grid = new_multi_grid.at(level + 1);
 
-            std::cout << "Interpolate " << (level + 1) << " to " << level
-                      << std::endl;
+            spdlog::debug("Interpolate {} to {}", (level + 1), level);
 
-            std::cout << "Previous has " << previous_grid->activeVoxelCount()
-                      << std::endl;
+            spdlog::debug("Previous has {}", previous_grid->activeVoxelCount());
 
             switch (type) {
             case SampleType::QUAD:
@@ -366,8 +371,7 @@ FloatGridPtr resample(SampledGrid    source,
                 break;
             }
 
-            std::cout << "Out prepared with " << out_grid->activeVoxelCount()
-                      << std::endl;
+            spdlog::debug("Out prepared with {}", out_grid->activeVoxelCount());
         }
 
 
@@ -378,9 +382,8 @@ FloatGridPtr resample(SampledGrid    source,
         //        openvdb::tools::resampleToMatch<openvdb::tools::BoxSampler>(
         //            *source.grid->grid(level), *out_grid);
 
-        std::cout << "Storing to " << level << std::endl;
-        std::cout << "Out resampled with " << out_grid->activeVoxelCount()
-                  << std::endl;
+        spdlog::debug("Storing to level {}", level);
+        spdlog::debug("Out resampled with {}", out_grid->activeVoxelCount());
 
 
         if (level != 0 and opts.strategy == BlurArgs::BLUR_AFTER_EVERY_LEVEL) {
@@ -396,7 +399,7 @@ FloatGridPtr resample(SampledGrid    source,
 
     if (opts.strategy == BlurArgs::BLUR_AT_END) { opts.blur_fld(ret_grid); }
 
-    std::cout << "Final " << ret_grid->activeVoxelCount() << std::endl;
+    spdlog::debug("Final ", ret_grid->activeVoxelCount());
 
     ret_grid->clipGrid(box);
     ret_grid->setName(source.name);
@@ -432,30 +435,42 @@ int amr_to_volume(Arguments const& c) {
         return SampleType::QUAD;
     }();
 
-    std::cout << "Using sample method " << to_string(type) << std::endl;
+    spdlog::info("Using sample method {}", to_string(type));
 
     auto blur_config_node =
         toml::find_or(amr_config_node, "blur", toml::value());
 
-    BlurArgs opts {
-        .strategy = BlurArgs::string_to_strat(
-            toml::find_or(blur_config_node, "strategy", "none")),
-        .blur_radius = toml::find_or<int>(blur_config_node, "radius", -1),
-        .blur_iterations =
-            toml::find_or<int>(blur_config_node, "iterations", 0),
-    };
+    BlurArgs opts = BlurArgs::from_toml(blur_config_node);
 
     GridMap completed;
 
     for (auto& multires : amr.grids) {
-        auto new_grid = resample(multires, amr.bbox, type, opts);
+        // check if there is a per-variable override
+
+        BlurArgs local_blur_args = opts;
+
+        if (amr_config_node.contains(multires.name)) {
+            spdlog::info("Using custom options for variable {}", multires.name);
+
+            auto local_config = toml::find(amr_config_node, multires.name);
+
+            auto local_blur_config =
+                toml::find_or(local_config, "blur", toml::value());
+
+            if (local_blur_config.is_table()) {
+                auto base = blur_config_node;
+                merge_values(base, local_blur_config);
+
+                local_blur_args = BlurArgs::from_toml(base);
+            }
+        }
+
+        auto new_grid = resample(multires, amr.bbox, type, local_blur_args);
         multires.grid.reset(); // try to minimize mem usage
         completed[new_grid->getName()] = new_grid;
     }
 
-    if (c.root.contains("post")) {
-        postprocess(PostProcessOptions::from_toml(c.root), completed);
-    }
+    if (c.root.contains("post")) { postprocess(c.root, completed); }
 
     openvdb::GridPtrVec to_save;
 

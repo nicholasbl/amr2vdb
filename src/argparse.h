@@ -8,6 +8,8 @@
 
 #include <toml.hpp>
 
+void merge_values(toml::value& old_value, toml::value& new_value);
+
 struct Arguments {
     toml::value root;
 

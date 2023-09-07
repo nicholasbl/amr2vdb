@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include "spdlog/spdlog.h"
+
 int main(int argc, char** argv) {
     if (argc <= 1) return EXIT_FAILURE;
 
@@ -17,11 +19,20 @@ int main(int argc, char** argv) {
 
     auto args = Arguments::parse(std::move(arguments));
 
-    std::cout << "Configuration: " << args.root << std::endl;
+    auto cfg = toml::format(args.root);
+
+    spdlog::info("Configuration: {}", cfg);
+
+    if (args.root.contains("debug")) {
+        spdlog::info("Enable debug output");
+        spdlog::set_level(spdlog::level::debug);
+    } else {
+        spdlog::set_level(spdlog::level::info);
+    }
 
     if (args.root.contains("amr")) { return amr_to_volume(args); }
     if (args.root.contains("flatten")) { return flatten_to_vdb(args); }
     if (args.root.contains("mesh")) { return mesh_to_volume(args); }
 
-    std::cerr << "no command given" << std::endl;
+    spdlog::error("no command given");
 }

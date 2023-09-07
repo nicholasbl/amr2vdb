@@ -91,11 +91,13 @@ find_package(OpenVDB REQUIRED)
 
 find_library(blosc_lib blosc ${THIRD_PARTY_DIR}/lib)
 
+find_package(spdlog)
+
 target_link_libraries(amr2vdb PRIVATE
     AMReX::amrex_3d
     PelePhysics::PelePhysics-drm19-Fuego-Simple
     TBB::tbb OpenVDB::openvdb
-    ${blosc_lib}
+    ${blosc_lib} spdlog::spdlog
 )
 
 

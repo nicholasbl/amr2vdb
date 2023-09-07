@@ -2,6 +2,8 @@
 
 #include <iostream>
 
+#include "spdlog/spdlog.h"
+
 std::string take_first(std::deque<std::string>& args) {
     if (args.empty()) return {};
     auto ret = std::move(args.front());
@@ -49,7 +51,7 @@ Arguments Arguments::parse(std::deque<std::string>&& args) {
 
     if (filename.empty()) { return ret; }
 
-    std::cout << "Reading configuration from " << filename << std::endl;
+    spdlog::info("Reading configuration from {}", filename);
 
     auto config = toml::parse(filename);
 
@@ -59,18 +61,16 @@ Arguments Arguments::parse(std::deque<std::string>&& args) {
 
         if (next.empty()) break;
 
-        std::cout << "Override " << next << std::endl;
+        spdlog::debug("Override {}", next);
 
         std::istringstream stream(next);
 
         auto override = toml::parse(stream);
 
-        std::cout << "PARSED: " << override << std::endl;
+        spdlog::info("Parsed as: {}", toml::format(override));
 
         merge_values(config, override);
     }
-
-    std::cout << "Done" << std::endl;
 
     ret.root = config;
 
