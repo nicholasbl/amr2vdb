@@ -9,6 +9,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <optional>
 
 using FloatMultiGrid    = openvdb::tools::MultiResGrid<openvdb::FloatTree>;
 using FloatMultiGridPtr = openvdb::tools::MultiResGrid<openvdb::FloatTree>::Ptr;
@@ -58,6 +59,7 @@ public:
 
 
 struct VolumeConfig {
-    int                   max_level = -1;
-    std::set<std::string> variables;
+    int                        max_level = -1;
+    std::set<std::string>      variables;
+    std::optional<std::string> save_amr;
 };

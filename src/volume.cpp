@@ -60,8 +60,6 @@ static void loop_box(amrex::Box const&                       bx,
     const auto lo = lbound(bx);
     const auto hi = ubound(bx);
 
-    // std::cout << "BOX " << lo << hi << std::endl;
-
     for (int k = lo.z; k <= hi.z; ++k) {
         for (int j = lo.y; j <= hi.y; ++j) {
             for (int i = lo.x; i <= hi.x; ++i) {
@@ -75,6 +73,23 @@ static void loop_box(amrex::Box const&                       bx,
 
                     assert(accessors[offset].getValue({ i, j, k }) == value);
                 }
+            }
+        }
+    }
+}
+
+static void loop_box_constant(amrex::Box const&             bx,
+                              float                         value,
+                              openvdb::FloatGrid::Accessor& accessors) {
+
+    const auto lo = lbound(bx);
+    const auto hi = ubound(bx);
+
+    for (int k = lo.z; k <= hi.z; ++k) {
+        for (int j = lo.y; j <= hi.y; ++j) {
+            for (int i = lo.x; i <= hi.x; ++i) {
+
+                accessors.setValue({ i, j, k }, value);
             }
         }
     }
@@ -179,19 +194,6 @@ struct ConversionState {
 
             spdlog::debug("Mapping to VDB level {}", vdb_mapped_level);
 
-            // now check if we have a coarser grid to copy into this one
-
-            //            if (vdb_mapped_level != config.max_level) {
-            //                std::cout << "Interpolation..." << std::endl;
-            //                for (auto& mg : vdb_grids) {
-            //                    openvdb::tools::resampleToMatch<openvdb::tools::BoxSampler>(
-            //                        *(mg->grid(vdb_mapped_level + 1)),
-            //                        *(mg->grid(vdb_mapped_level)));
-            //                }
-            //            }
-
-
-            // for each level, get each vars grid
             std::vector<FloatGridPtr>        per_var_grid;
             std::vector<FloatGrid::Accessor> per_var_accessor;
 
@@ -230,9 +232,12 @@ struct ConversionState {
 
         std::vector<SampledGrid> ret_grid;
 
+
         for (int i = 0; i < vdb_grids.size(); i++) {
             ret_grid.emplace_back(SampledGrid { var_names[i], vdb_grids[i] });
         }
+
+        if (config.save_amr) { ret_grid.push_back(save_amr()); }
 
         Result ret;
 
@@ -244,6 +249,50 @@ struct ConversionState {
 
 
         return ret;
+    }
+
+    SampledGrid save_amr() const {
+        spdlog::info("Building AMR structure grid...");
+        auto g = std::make_shared<FloatMultiGrid>(config.max_level + 1, 0.0f);
+
+        for (int current_level = 0; current_level <= config.max_level;
+             current_level++) {
+            spdlog::info("Working on AMR level {}", current_level);
+            // also note that VDB does inverse sampling. 0 is the finest.
+            // so we want to map, say 3 -> 0 and 0 -> 3
+
+            size_t vdb_mapped_level = (config.max_level - current_level);
+
+            spdlog::debug("Mapping to VDB level {}", vdb_mapped_level);
+
+            FloatGridPtr        per_var_grid     = g->grid(vdb_mapped_level);
+            FloatGrid::Accessor per_var_accessor = per_var_grid->getAccessor();
+
+            auto const& ba = plt_data->getGrid(current_level);
+
+            auto const& mf = plt_data->get_data(current_level);
+
+            auto iter = amrex::MFIter(mf);
+
+            spdlog::debug("Iterating blocks...");
+
+            for (; iter.isValid(); ++iter) {
+                auto const& box = iter.validbox();
+
+                amrex::FArrayBox const& fab = mf[iter];
+
+                auto const& a = fab.array();
+
+                loop_box_constant(box, vdb_mapped_level, per_var_accessor);
+            }
+
+            openvdb::tools::prune(per_var_grid->tree());
+        }
+
+        return {
+            .name = config.save_amr.value(),
+            .grid = g,
+        };
     }
 };
 
@@ -419,6 +468,10 @@ int amr_to_volume(Arguments const& c) {
     VolumeConfig config;
 
     auto source_vars = toml::find(amr_config_node, "variables").as_array();
+
+    if (amr_config_node.contains("save_amr")) {
+        config.save_amr = toml::find<std::string>(amr_config_node, "save_amr");
+    }
 
     for (auto const& var : source_vars) {
         config.variables.insert(var.as_string());
