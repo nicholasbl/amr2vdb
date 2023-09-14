@@ -283,7 +283,7 @@ struct ConversionState {
 
                 auto const& a = fab.array();
 
-                loop_box_constant(box, vdb_mapped_level, per_var_accessor);
+                loop_box_constant(box, vdb_mapped_level + 1, per_var_accessor);
             }
 
             openvdb::tools::prune(per_var_grid->tree());
