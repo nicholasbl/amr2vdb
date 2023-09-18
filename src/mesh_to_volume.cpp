@@ -1,6 +1,7 @@
 #include "mesh_to_volume.h"
 
 #include "argparse.h"
+#include "spdlog/spdlog.h"
 
 #include <openvdb/openvdb.h>
 #include <openvdb/tools/Composite.h>
@@ -19,6 +20,7 @@ using openvdb::Vec3I;
 using openvdb::Vec3s;
 using openvdb::Vec4I;
 
+/// A mesh structure that conforms to MeshDataAdapter required by openvdb
 struct Mesh {
     std::vector<Vec3s> points;
     std::vector<Vec3I> triangles;
@@ -35,25 +37,28 @@ struct Mesh {
     }
 };
 
+/// If the given condition is not true, print given message and explode
 inline void require(bool value, std::string_view expr) {
     if (!value) {
-        std::cerr << expr << std::endl;
+        spdlog::error(expr);
         exit(EXIT_FAILURE);
     }
 }
 
 using ByteVector = std::vector<std::byte>;
 
+/// XMF file state
 struct XMFFile {
     std::string name;
     fs::path    source_file;
 
     Mesh mesh;
 
-    // absolute path to bytes
+    /// Map of an absolute path to the byte contents of that file
     std::unordered_map<std::string, std::shared_ptr<ByteVector>>
         data_source_map;
 
+    /// Obtain the bytes for a given absolute path, caching it if need be
     std::shared_ptr<ByteVector> fetch(std::string path) {
         auto iter = data_source_map.find(path);
 
@@ -77,6 +82,9 @@ struct XMFFile {
         return bv;
     }
 
+    /// Take a path embedded in the XMF file and get the file bytes
+    /// This function will work with absolute and relative paths.
+    /// If a relative path is missing, it will do a limited search
     std::shared_ptr<ByteVector> get_path(std::string path) {
         std::cout << "Finding referenced file: " << path << std::endl;
 
@@ -104,11 +112,12 @@ struct XMFFile {
 
         // cant find it. bail
 
-        std::cerr << "Unable to find referenced file: " << path << std::endl;
+        spdlog::error("Unable to find referenced file: {}", path);
         exit(EXIT_FAILURE);
     }
 };
 
+/// Take a span of a given type, and cast it to a span of a different type
 template <class U, class T>
     requires(std::is_standard_layout_v<T> and std::is_standard_layout_v<U>)
 std::span<U> span_cast(std::span<T> s) {
@@ -119,6 +128,8 @@ std::span<U> span_cast(std::span<T> s) {
                         std::as_bytes(s).size() / sizeof(U));
 }
 
+/// Take a span of a given type, and cast it to a span of a different type
+/// (const version)
 template <class U, class T>
     requires(std::is_standard_layout_v<T> and std::is_standard_layout_v<U>)
 std::span<U const> span_cast(std::span<T const> s) {
@@ -129,6 +140,9 @@ std::span<U const> span_cast(std::span<T const> s) {
                               std::as_bytes(s).size() / sizeof(U));
 }
 
+
+/// Obtain a subspan of a given span. Unlike the std version, this does a lot of
+/// checks, and will return a shorter span to avoid undefined behavior
 template <class T>
 auto safe_subspan(std::span<T> sp,
                   size_t       offset,
@@ -142,6 +156,7 @@ auto safe_subspan(std::span<T> sp,
     return sp.subspan(offset, count);
 }
 
+/// A XMF 'dataitem'
 struct DataItem {
     std::string name;
     std::string format;

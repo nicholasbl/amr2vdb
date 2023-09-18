@@ -4,12 +4,14 @@
 
 #include "spdlog/spdlog.h"
 
-std::string take_first(std::deque<std::string>& args) {
+/// pop the first element off a deque. if empty, return empty string.
+static std::string take_first(std::deque<std::string>& args) {
     if (args.empty()) return {};
     auto ret = std::move(args.front());
     args.pop_front();
     return ret;
 }
+
 
 void merge_values(toml::value& old_value, toml::value& new_value) {
     switch (old_value.type()) {

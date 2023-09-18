@@ -19,17 +19,19 @@ using GridPtr      = openvdb::GridBase::Ptr;
 
 // =============================================================================
 
+/// Volume fraction trim
 struct PPVFrac {
     std::string name             = "v?frac";
     float       value            = .5;
     bool        keep_above_value = true;
 };
 
+/// Velocity merge variable names
 struct PPVelName {
     std::string x, y, z;
 };
 
-// =============================================================================
+// Custom Grid Types ===========================================================
 
 #define BIN_OP(OPER)                                                           \
     inline LVec operator OPER(LVec b) const {                                  \
@@ -124,10 +126,11 @@ using Mat3Grid = openvdb::Grid<Mat3Tree>;
 
 // =============================================================================
 
+/// Process an arbitrary grid, downcasting to the appropriate concrete grid type
+/// this is from:
+/// https://www.openvdb.org/documentation/doxygen/codeExamples.html#sGenericProg
 template <typename OpType>
 void process_typed_grid(openvdb::GridBase::Ptr grid, OpType&& op) {
-// this is from:
-// https://www.openvdb.org/documentation/doxygen/codeExamples.html#sGenericProg
 #define CALL_OP(GridType) op(openvdb::gridPtrCast<GridType>(grid))
     if (grid->isType<openvdb::BoolGrid>()) CALL_OP(openvdb::BoolGrid);
     else if (grid->isType<openvdb::FloatGrid>())
@@ -147,6 +150,10 @@ void process_typed_grid(openvdb::GridBase::Ptr grid, OpType&& op) {
 #undef CALL_OP
 }
 
+
+// Simple string wildcard matching =============================================
+
+/// Remove first char from string
 static inline std::string_view advance(std::string_view s) {
     return s.substr(1);
 }
@@ -183,12 +190,15 @@ static bool match_simple_impl(std::string_view pattern,
     return string.empty() and pattern.empty();
 }
 
-
+/// Match two strings, supporting '*' (zero or more wild) and '?" (single wild)
 bool match_simple(std::string_view pattern, std::string_view string) {
     if (pattern.empty()) return false;
     return match_simple_impl(pattern, string);
 }
 
+// =============================================================================
+
+/// Find a grid by name in a grid collection
 GridPtr find_grid_by_name(std::string_view pattern, GridMap const& grids) {
 
     for (auto const& [k, v] : grids) {
@@ -202,6 +212,7 @@ GridPtr find_grid_by_name(std::string_view pattern, GridMap const& grids) {
     return nullptr;
 }
 
+/// Find and remove grid by name in a grid collection
 GridPtr take_grid_by_name(std::string_view pattern, GridMap& grids) {
 
     for (auto iter = grids.begin(); iter != grids.end(); iter++) {
@@ -221,6 +232,7 @@ GridPtr take_grid_by_name(std::string_view pattern, GridMap& grids) {
 
 // =============================================================================
 
+/// Create a mask using value equality from a quantity grid
 openvdb::BoolGrid::Ptr extract_mask(FloatGridPtr   vfrac_grid,
                                     PPVFrac const& vfrac_info) {
     spdlog::info("Extracting mask...");
@@ -257,6 +269,7 @@ openvdb::BoolGrid::Ptr extract_mask(FloatGridPtr   vfrac_grid,
         }
     };
 
+    // Create bool grid from equality
     if (vfrac_info.keep_above_value) {
         openvdb::tools::transformValues(
             vfrac_grid->cbeginValueOn(), *ret, xfrmr_keep_gt);
@@ -265,11 +278,11 @@ openvdb::BoolGrid::Ptr extract_mask(FloatGridPtr   vfrac_grid,
             vfrac_grid->cbeginValueOn(), *ret, xfrmr_keep_lt);
     }
 
+    // Deactivate false
     openvdb::tools::deactivate(*ret, false);
 
+    // Prune inactive
     openvdb::tools::pruneInactive(ret->tree());
-
-    // create mask from active values
 
     return ret;
 }
@@ -287,6 +300,8 @@ inline FloatGridPtr cast_to_float(GridPtr ptr) {
 
 // =============================================================================
 
+/// Given a 'volume fraction', trim all grids in a collection to preserve only
+/// those parts in the requested simulation volume region
 void trim_all_vfrac(PPVFrac vfrac_info, GridMap& grids) {
     spdlog::info("Trimming...");
     auto grid = find_grid_by_name(vfrac_info.name, grids);
@@ -299,7 +314,6 @@ void trim_all_vfrac(PPVFrac vfrac_info, GridMap& grids) {
     spdlog::info("Trim will use {}", grid->getName());
 
     // to compute the mask, we first take a copy of the vfrac grid
-
     auto mask = extract_mask(cast_to<FloatGrid>(grid), vfrac_info);
 
     for (auto& [k, v] : grids) {
@@ -315,6 +329,8 @@ void trim_all_vfrac(PPVFrac vfrac_info, GridMap& grids) {
 
 // =============================================================================
 
+/// Take a grid of a certain type, and produce a grid of a different type,
+/// as specified by a given function that operates on the grid values.
 template <class OutGrid, class InGrid, class Function>
 auto convert(InGrid&& in, Function&& tf) {
     auto op = [&](auto const& iter, auto& accessor) {
@@ -336,56 +352,25 @@ auto convert(InGrid&& in, Function&& tf) {
     return ret;
 }
 
-using Vec2fGrid = openvdb::Grid<openvdb::Vec2STree>;
-
-static Vec2fGrid::Ptr scalar_to_vector2(FloatGridPtr&& grid) {
-    auto op = [](openvdb::FloatGrid::ValueOnCIter const& iter, auto& accessor) {
-        auto value = openvdb::Vec2f(*iter);
-
-        if (iter.isVoxelValue()) {
-            accessor.setValue(iter.getCoord(), value);
-        } else {
-            openvdb::CoordBBox bbox;
-            iter.getBoundingBox(bbox);
-            accessor.getTree()->fill(bbox, value);
-        }
-    };
-
-    auto ret = Vec2fGrid::create();
-
-    openvdb::tools::transformValues(grid->cbeginValueOn(), *ret, op);
-
-    return ret;
-}
-
+/// Convert a scalar grid to a vec3 grid. Each scalar is copied to all
+/// components in the result vector.
 static openvdb::Vec3fGrid::Ptr scalar_to_vector3(FloatGridPtr&& grid) {
-    auto op = [](openvdb::FloatGrid::ValueOnCIter const& iter, auto& accessor) {
-        auto value = openvdb::Vec3f(*iter);
-
-        if (iter.isVoxelValue()) {
-            accessor.setValue(iter.getCoord(), value);
-        } else {
-            openvdb::CoordBBox bbox;
-            iter.getBoundingBox(bbox);
-            accessor.getTree()->fill(bbox, value);
-        }
-    };
-
-    auto ret = openvdb::Vec3fGrid::create();
-
-    openvdb::tools::transformValues(grid->cbeginValueOn(), *ret, op);
-
-    return ret;
+    return convert<openvdb::Vec3fGrid>(
+        std::move(grid), [](float f) { return openvdb::Vec3f(f); });
 }
 
+/// Take three scalar grids and merge them into a single vector grid
 void merge_velocity(PPVelName const& names, GridMap& grids) {
     spdlog::info("Merging velocity...");
+
+    // Get those scalar grids
     auto vx = cast_to_float(take_grid_by_name(names.x, grids));
     auto vy = cast_to_float(take_grid_by_name(names.y, grids));
     auto vz = cast_to_float(take_grid_by_name(names.z, grids));
 
     if (!vx or !vy or !vz) return;
 
+    // upgrade x and y to vec3
     auto upgrade_x = scalar_to_vector3(std::move(vx));
     auto upgrade_y = scalar_to_vector3(std::move(vy));
 
@@ -395,6 +380,7 @@ void merge_velocity(PPVelName const& names, GridMap& grids) {
         result = openvdb::Vec3f(a.x(), b.x(), 1);
     };
 
+    // Combine x and y into a single vector grid
     spdlog::debug("Adding x + y...");
     upgrade_x->tree().combine(upgrade_y->tree(), combiner);
 
@@ -402,7 +388,6 @@ void merge_velocity(PPVelName const& names, GridMap& grids) {
     upgrade_y = nullptr;
 
     // y should be empty, x should have partial results. now get z
-
     auto upgrade_z = scalar_to_vector3(std::move(vz));
 
     auto final_combiner = [](openvdb::Vec3f const& xy,
@@ -411,6 +396,7 @@ void merge_velocity(PPVelName const& names, GridMap& grids) {
         result = openvdb::Vec3f(xy.x(), xy.y(), z.x());
     };
 
+    // add in z to our result grid
     spdlog::debug("Adding xy + z...");
     upgrade_x->tree().combine(upgrade_z->tree(), final_combiner);
 
@@ -424,16 +410,21 @@ void merge_velocity(PPVelName const& names, GridMap& grids) {
 
 // =============================================================================
 
+/// Compute the magnitude of vorticity, and add it to a grid collection
 void add_in_magvort(GridMap& grids) {
     spdlog::info("Computing magvort...");
+
+    // we need the vector velocity field
     auto vel =
         cast_to<openvdb::Vec3fGrid>(find_grid_by_name("velocity", grids));
 
     if (!vel) return;
 
+    // the vorticity is just the curl
     auto vort = openvdb::tools::curl(*vel);
 
-    auto magvort = openvdb::v10_0::tools::magnitude(*vort);
+    // and now we get the magnitude of that curl
+    auto magvort = openvdb::tools::magnitude(*vort);
 
     auto new_grid_name = "magvort";
 
@@ -445,7 +436,10 @@ void add_in_magvort(GridMap& grids) {
 
 // =============================================================================
 
-// Todo: generalize
+/// Compute the magnitude of the gradient of density. This is the Schlieren plot
+/// of the data
+///
+///  Todo: generalize
 void add_in_mag_grad_density(std::string density_name, GridMap& grids) {
     spdlog::info("Computing mag(grad({}))...", density_name);
 
@@ -473,21 +467,17 @@ void add_in_mag_grad_density(std::string density_name, GridMap& grids) {
 
 // =============================================================================
 
-// template <typename Q>
-// void ComputeQCriterionFromGradient(double* gradients, Q qCriterion)
-//{
-//     // see http://public.kitware.com/pipermail/paraview/2015-May/034233.html
-//     for
-//     // paper citation and formula on Q-criterion.
-//     qCriterion[0] =
-//         -(gradients[0] * gradients[0] + gradients[4] * gradients[4] +
-//         gradients[8] * gradients[8]) /
-//             2. -
-//         (gradients[1] * gradients[3] + gradients[2] * gradients[6] +
-//         gradients[5] * gradients[7]);
-// }
-
+/// Consume a jacobian, and compute the qcriterion
 void crunch_qcrit(Mat3Grid::Ptr jac, GridMap& grids) {
+    // see http://public.kitware.com/pipermail/paraview/2015-May/034233.html for
+    // paper citation and formula on Q-criterion.
+    //     qCriterion[0] =
+    //         -(gradients[0] * gradients[0] + gradients[4] * gradients[4] +
+    //         gradients[8] * gradients[8]) /
+    //             2. -
+    //         (gradients[1] * gradients[3] + gradients[2] * gradients[6] +
+    //         gradients[5] * gradients[7]);
+
     spdlog::debug("Computing qcrit quantity...");
     auto fld = convert<FloatGrid>(jac, [](Mat3 const& m) {
         return -(m[0] * m[0] + m[4] * m[4] + m[8] * m[8]) / 2. -
@@ -501,7 +491,13 @@ void crunch_qcrit(Mat3Grid::Ptr jac, GridMap& grids) {
     grids[name] = fld;
 }
 
-void qcrit_3d_vel(std::string name, GridMap& grids) { }
+void qcrit_3d_vel(std::string name, GridMap& grids) {
+    spdlog::error("not yet implemented!");
+    return;
+}
+
+/// Compute q_criterion from 3 scalar velocity fields.
+/// This is VERY EXPENSIVE
 void qcrit_1d_vel(std::string vx,
                   std::string vy,
                   std::string vz,
@@ -593,6 +589,8 @@ void qcrit_1d_vel(std::string vx,
     crunch_qcrit(result, grids);
 }
 
+/// Compute the Q criterion with provided velocity. Note that this is SUPER
+/// MEMORY HUNGRY
 void add_in_qcriterion(std::vector<std::string> names, GridMap& grids) {
     spdlog::info("Computing qcriterion...");
 
@@ -604,12 +602,6 @@ void add_in_qcriterion(std::vector<std::string> names, GridMap& grids) {
         return qcrit_1d_vel(names.at(0), names.at(1), names.at(2), grids);
         break;
     }
-
-
-    //    m->setName(new_grid_name);
-    //    m->setGridClass(openvdb::GridClass::GRID_FOG_VOLUME);
-
-    //    grids[new_grid_name] = m;
 }
 
 // =============================================================================

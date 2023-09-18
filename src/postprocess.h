@@ -4,8 +4,7 @@
 
 #include <toml.hpp>
 
-#include <optional>
-
 using GridMap = std::unordered_map<std::string, openvdb::GridBase::Ptr>;
 
+/// Run postprocessing on this grid collection
 void postprocess(toml::value const& root, GridMap&);

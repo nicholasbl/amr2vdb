@@ -25,7 +25,7 @@
 #include <array>
 #include <span>
 
-
+/// Type of sampling to use during interpolation
 enum class SampleType {
     QUAD,
     LANC,
@@ -41,17 +41,25 @@ const char* to_string(SampleType type) {
     __builtin_unreachable();
 }
 
-
+/// Intermediate multiresolution grid, ready for interpolation
 struct SampledGrid {
     std::string       name;
     FloatMultiGridPtr grid;
 };
 
+/// Extraction result
 struct Result {
     openvdb::BBoxd           bbox;
     std::vector<SampledGrid> grids;
 };
 
+/// Take an AMR box, and copy selected variables of that box to an AMR accessor
+///
+/// \param bx AMR box
+/// \param a AMR box data
+/// \param accessors List of destination accessors
+/// \param var_indices List of variable ids to extract
+///
 static void loop_box(amrex::Box const&                       bx,
                      amrex::Array4<amrex::Real const> const& a,
                      std::span<openvdb::FloatGrid::Accessor> accessors,
@@ -77,6 +85,7 @@ static void loop_box(amrex::Box const&                       bx,
         }
     }
 }
+
 
 static void loop_box_constant(amrex::Box const&             bx,
                               float                         value,
