@@ -86,7 +86,12 @@ static void loop_box(amrex::Box const&                       bx,
     }
 }
 
-
+/// Take an AMR box, and, using the box bounds, write a constant to a VDB grid
+///
+/// \param bx AMR box
+/// \param value Constant to write
+/// \param accessors VDB grid destination
+///
 static void loop_box_constant(amrex::Box const&             bx,
                               float                         value,
                               openvdb::FloatGrid::Accessor& accessors) {
@@ -104,17 +109,26 @@ static void loop_box_constant(amrex::Box const&             bx,
     }
 }
 
+///
+/// The ConversionState class models the settings and state for a conversion
+///
 struct ConversionState {
     VolumeConfig  config;
 
     std::unique_ptr<LocalPlotFile> plt_data;
 
+    /// Requested variable names
     std::vector<std::string> var_names;
+    /// Corresponding variable ids in the AMR
     std::vector<int>         var_ids;
 
     ConversionState(VolumeConfig c) : config(c) { }
 
-
+    ///
+    /// Attempt to load an AMR file
+    /// \param path Pltfile path
+    /// \return True if Pltfile could be opened
+    ///
     bool init(std::filesystem::path path) {
         if (!std::filesystem::exists(path)) {
             spdlog::error("Path does not exist: {}", path.string());
@@ -123,7 +137,8 @@ struct ConversionState {
 
         plt_data      = std::make_unique<LocalPlotFile>(path);
         auto plt_vars = plt_data->getVariableList();
-        // int  nvars    = plt_vars.size();
+
+        // Figure out which vars were asked for, and where they are in the plt
 
         {
             std::set<std::string> extant_names(plt_vars.begin(),
@@ -161,6 +176,8 @@ struct ConversionState {
             return false;
         }
 
+        // Pull plt data in core. The API suggests that this pulls in ALL the
+        // data, so watch out
         plt_data->readPlotFileData();
 
         spdlog::info("Done.");
@@ -168,6 +185,7 @@ struct ConversionState {
         return true;
     }
 
+    /// Execute a copy from AMR to multires VDBs
     Result write_to_vdbs() const {
         spdlog::info("Extracting AMR to Multires VDB");
         auto geom = plt_data->getGeom(config.max_level);
@@ -183,6 +201,8 @@ struct ConversionState {
         spdlog::info("Domain H: {} {} {}", harray[0], harray[1], harray[2]);
         spdlog::info("Var Num:  {}", plt_data->getVariableList().size());
 
+        // This is a bit silly, but we just make a big list of vdbs that
+        // correspond to our list of desired variables
         std::vector<FloatMultiGrid::Ptr> vdb_grids;
 
         for (size_t i = 0; i < var_ids.size(); i++) {
@@ -196,13 +216,15 @@ struct ConversionState {
         for (int current_level = 0; current_level <= config.max_level;
              current_level++) {
             spdlog::info("Working on AMR level {}", current_level);
-            // also note that VDB does inverse sampling. 0 is the finest.
-            // so we want to map, say 3 -> 0 and 0 -> 3
+            // also note that VDB does inverse resolution order. 0 is the
+            // finest. so we want to map, say 3 -> 0 and 0 -> 3
 
             size_t vdb_mapped_level = (config.max_level - current_level);
 
             spdlog::debug("Mapping to VDB level {}", vdb_mapped_level);
 
+            // Get all the var-vdbs at the appropriate level, along with
+            // accessors
             std::vector<FloatGridPtr>        per_var_grid;
             std::vector<FloatGrid::Accessor> per_var_accessor;
 
@@ -222,6 +244,7 @@ struct ConversionState {
 
             auto const& mf = plt_data->get_data(current_level);
 
+            // We can now iterate the AMR at this level
             auto iter = amrex::MFIter(mf);
 
             spdlog::debug("Iterating blocks...");
@@ -239,12 +262,16 @@ struct ConversionState {
 
         spdlog::info("Sampling complete");
 
-        std::vector<SampledGrid> ret_grid;
+        // Transform output a bit to simplify things
 
+        std::vector<SampledGrid> ret_grid;
 
         for (int i = 0; i < vdb_grids.size(); i++) {
             ret_grid.emplace_back(SampledGrid { var_names[i], vdb_grids[i] });
         }
+
+        // If the user asked for an AMR structure grid, execute that and add it
+        // in
 
         if (config.save_amr) { ret_grid.push_back(save_amr()); }
 
@@ -260,6 +287,8 @@ struct ConversionState {
         return ret;
     }
 
+    /// Save the AMR struture. This creates a float grid VDB, where every voxel
+    /// is the finest level of the AMR refinement at that spot
     SampledGrid save_amr() const {
         spdlog::info("Building AMR structure grid...");
         auto g = std::make_shared<FloatMultiGrid>(config.max_level + 1, 0.0f);
@@ -267,8 +296,6 @@ struct ConversionState {
         for (int current_level = 0; current_level <= config.max_level;
              current_level++) {
             spdlog::info("Working on AMR level {}", current_level);
-            // also note that VDB does inverse sampling. 0 is the finest.
-            // so we want to map, say 3 -> 0 and 0 -> 3
 
             size_t vdb_mapped_level = (config.max_level - current_level);
 
@@ -305,7 +332,9 @@ struct ConversionState {
     }
 };
 
-
+///
+/// Wrapper function to pull in a PLT file
+///
 static Result load_file(std::filesystem::path path, VolumeConfig const& c) {
     auto state = AMRState();
 
@@ -316,17 +345,21 @@ static Result load_file(std::filesystem::path path, VolumeConfig const& c) {
     return c_state.write_to_vdbs();
 }
 
+///
+/// The BlurArgs class holds smoothing/blurring options
+///
 struct BlurArgs {
     enum Strat {
-        NO_BLUR,
-        BLUR_AFTER_EVERY_LEVEL,
-        BLUR_AFTER_LAST_LEVEL,
-        BLUR_AT_END,
+        NO_BLUR,                // No blur requested
+        BLUR_AFTER_EVERY_LEVEL, // As we process levels, blur each time
+        BLUR_AFTER_LAST_LEVEL,  // Only blur the last coarsest level
+        BLUR_AT_END,            // Blur the whole thing at the end
     } strategy = NO_BLUR;
 
     int blur_radius     = 1;
     int blur_iterations = 1;
 
+    /// Read blur options from a TOML node
     static BlurArgs from_toml(toml::value const& val) {
         return BlurArgs {
             .strategy = BlurArgs::string_to_strat(
@@ -336,6 +369,7 @@ struct BlurArgs {
         };
     }
 
+    /// Execute a blur on a given grid
     void blur_fld(FloatGridPtr ptr) const {
         if (blur_radius <= 0) return;
 
@@ -347,6 +381,7 @@ struct BlurArgs {
         filter.mean(blur_radius, blur_iterations);
     }
 
+    /// Turing a string into a strategy
     static Strat string_to_strat(std::string text) {
         static std::unordered_map<std::string, Strat> mapper = {
             { "after_every", BLUR_AFTER_EVERY_LEVEL },
@@ -366,6 +401,8 @@ struct BlurArgs {
     }
 };
 
+/// Make a multiresolution VDB (which is just a list of grids with different
+/// transforms)
 std::vector<FloatGridPtr> make_grids(int level) {
     std::vector<FloatGridPtr> ret;
     assert(level > 0);
@@ -375,6 +412,7 @@ std::vector<FloatGridPtr> make_grids(int level) {
 
         auto xform = openvdb::math::Transform::createLinearTransform();
 
+        // each level is a power of two refinement
         if (level > 0) xform->preScale(1 << i);
 
         g->setTransform(xform);
@@ -385,6 +423,25 @@ std::vector<FloatGridPtr> make_grids(int level) {
     return ret;
 }
 
+
+/// Take an AMR styled VDB grid and resample into a single uniform grid.
+///
+/// This requires care. AMR only has the blocks that matter at a refinement
+/// level. VDB expects their multires data to be like a mipmap, where all the
+/// coarse levels are mirrors (at lower res) of the finest level. So to make a
+/// uniform grid with the tools VDB has, we go level by level, interpolating
+/// coarser information first, then copying over the AMR data at that level.
+///
+/// This function can also do some smoothing; coarse data can get pretty blocky,
+/// so we can optionally smooth levels or at the end. Smoothing does change the
+/// domain, so a clip box is provided to restrict the output VDB
+///
+/// \param source Multires grid to pack into a uniform grid
+/// \param box Box to clip the data to
+/// \param type Interpolation sampling type
+/// \param opts Options for smoothing/blurring
+/// \return A uniform grid at the finest resolution of the input
+///
 FloatGridPtr resample(SampledGrid    source,
                       openvdb::BBoxd box,
                       SampleType     type,
@@ -406,7 +463,12 @@ FloatGridPtr resample(SampledGrid    source,
 
         spdlog::debug("In {}", in_grid->activeVoxelCount());
 
+        // We first check if there is a coarser grid, and if so, interpolate
+        // that into this grid. This a bit like a painter's algorithm approach;
+        // interpolate first, then copy in data for this level
+
         if (level != max_levels - 1) {
+            // Take from a coarser grid, and interpolate into this grid
             auto previous_grid = new_multi_grid.at(level + 1);
 
             spdlog::debug("Interpolate {} to {}", (level + 1), level);
@@ -435,10 +497,6 @@ FloatGridPtr resample(SampledGrid    source,
 
         // copy over new data
         openvdb::tools::compReplace(*out_grid, *source.grid->grid(level));
-
-        // smoother but overall more shitty.
-        //        openvdb::tools::resampleToMatch<openvdb::tools::BoxSampler>(
-        //            *source.grid->grid(level), *out_grid);
 
         spdlog::debug("Storing to level {}", level);
         spdlog::debug("Out resampled with {}", out_grid->activeVoxelCount());

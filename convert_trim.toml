@@ -1,0 +1,12 @@
+debug = 1
+
+[amr]
+variables = [ "density", "vfrac" ]
+
+save_amr = "amr_structure"
+
+[post]
+compute_mgd.variable = "density"
+trim.variable = "vfrac"
+trim.value = 0.9
+trim.less = false

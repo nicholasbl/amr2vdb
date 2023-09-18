@@ -1,0 +1,15 @@
+[amr]
+variables = [ "Temp" , "x_velocity", "y_velocity", "z_velocity" ]
+
+[amr.blur]
+strategy = "at_end"
+radius = 1
+iterations = 2
+
+[post]
+compute_magvort = true
+
+[post.merge_velocity]
+x = "x_velocity"
+y = "y_velocity"
+z = "z_velocity"
