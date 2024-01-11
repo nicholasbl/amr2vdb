@@ -87,6 +87,7 @@ list(PREPEND CMAKE_MODULE_PATH "${THIRD_PARTY_DIR}/lib64/cmake/OpenVDB/")
 set(Boost_USE_STATIC_LIBS ON)
 find_package(TBB REQUIRED)
 
+find_library(zstd_lib zstd ${THIRD_PARTY_DIR}/lib)
 find_library(blosc_lib blosc ${THIRD_PARTY_DIR}/lib)
 find_library(openvdb_lib openvdb ${THIRD_PARTY_DIR}/lib)
 find_library(boost_io boost_iostreams ${THIRD_PARTY_DIR}/lib)
@@ -97,7 +98,7 @@ target_link_libraries(amr2vdb PRIVATE
     AMReX::amrex_3d
     PelePhysics::PelePhysics-drm19-Fuego-Simple
     TBB::tbb ${openvdb_lib} ${boost_io}
-    ${blosc_lib} spdlog::spdlog
+    ${blosc_lib} spdlog::spdlog ${zstd}
 )
 
 # IDE Helpers ==================================================================
