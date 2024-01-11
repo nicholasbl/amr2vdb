@@ -98,7 +98,7 @@ target_link_libraries(amr2vdb PRIVATE
     AMReX::amrex_3d
     PelePhysics::PelePhysics-drm19-Fuego-Simple
     TBB::tbb ${openvdb_lib} ${boost_io}
-    ${blosc_lib} spdlog::spdlog ${zstd}
+    ${blosc_lib} spdlog::spdlog ${zstd_lib}
 )
 
 # IDE Helpers ==================================================================
