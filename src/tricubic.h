@@ -11,7 +11,7 @@ struct Tricubic {
     static bool mipmap() { return true; }
     static bool consistent() { return false; }
 
-    openvdb::v10_0::tools::BoxSampler box_sampler;
+    openvdb::tools::BoxSampler box_sampler;
 
     template <class TreeT>
     bool sample(TreeT const&               tree,

@@ -1,3 +1,17 @@
+- zlib
+type : cmake
+src  : https://github.com/madler/zlib/releases/download/v1.2.13/zlib-1.2.13.tar.gz
+options :
+    BUILD_SHARED_LIBS OFF
+
+- zstd
+type : cmake
+src  : https://github.com/facebook/zstd/archive/refs/tags/v1.5.0.tar.gz
+options :
+    ZSTD_BUILD_PROGRAMS OFF
+    ZSTD_BUILD_TESTS OFF
+    ZSTD_BUILD_SHARED OFF
+
 - boost
 type : boost
 src  : https://boostorg.jfrog.io/artifactory/main/release/1.83.0/source/boost_1_83_0.tar.bz2
@@ -24,24 +38,12 @@ options :
     BUILD_FUZZERS OFF
     BUILD_SHARED OFF
     BUILD_BENCHMARKS OFF
-
-- zlib
-type : cmake
-src  : https://github.com/madler/zlib/releases/download/v1.2.13/zlib-1.2.13.tar.gz
-options :
-    BUILD_SHARED_LIBS OFF
-    
-- zstd
-type : cmake
-src  : https://github.com/facebook/zstd/archive/refs/tags/v1.5.0.tar.gz
-options :
-    ZSTD_BUILD_PROGRAMS OFF
-    ZSTD_BUILD_TESTS OFF
-    ZSTD_BUILD_SHARED OFF
+    PREFER_EXTERNAL_ZLIB ON
+    PREFER_EXTERNAL_ZSTD ON
     
 - openvdb
 type : cmake
-src  : https://github.com/AcademySoftwareFoundation/openvdb/archive/refs/tags/v10.0.1.tar.gz
+src  : https://github.com/AcademySoftwareFoundation/openvdb/archive/refs/tags/v11.0.0.tar.gz
 options :
     USE_BLOSC ON
     USE_ZLIB ON
