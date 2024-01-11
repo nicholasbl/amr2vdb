@@ -24,7 +24,7 @@ options :
     BUILD_FUZZERS OFF
     BUILD_SHARED OFF
     BUILD_BENCHMARKS OFF
-    
+
 - zlib
 type : cmake
 src  : https://github.com/madler/zlib/releases/download/v1.2.13/zlib-1.2.13.tar.gz
@@ -47,6 +47,7 @@ options :
     USE_ZLIB ON
     USE_IMATH_HALF OFF
     OPENVDB_CORE_SHARED OFF
+    USE_STATIC_DEPENDENCIES ON
     OPENVDB_BUILD_BINARIES OFF
     Boost_USE_STATIC_LIBS  ON
 

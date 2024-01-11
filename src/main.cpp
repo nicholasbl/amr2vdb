@@ -1,5 +1,6 @@
 #include "argparse.h"
 #include "mesh_to_volume.h"
+#include "special.h"
 #include "volume.h"
 #include "volume2.h"
 
@@ -8,10 +9,14 @@
 #include <string>
 #include <vector>
 
+#include <openvdb/openvdb.h>
+
 #include "spdlog/spdlog.h"
 
 int main(int argc, char** argv) {
     if (argc <= 1) return EXIT_FAILURE;
+
+    openvdb::initialize();
 
     std::deque<std::string> arguments = { argv + 1, argv + argc };
 
@@ -33,6 +38,7 @@ int main(int argc, char** argv) {
     if (args.root.contains("amr")) { return amr_to_volume(args); }
     if (args.root.contains("flatten")) { return flatten_to_vdb(args); }
     if (args.root.contains("mesh")) { return mesh_to_volume(args); }
+    if (args.root.contains("all_iso_merge")) { return all_iso_merge(args); }
 
     spdlog::error("no command given");
 }

@@ -53,6 +53,7 @@ add_executable(amr2vdb
     src/volume2.h
     src/postprocess.h src/postprocess.cpp
     src/argparse.cpp
+    src/special.h src/special.cpp
 )
 
 set(BUILD_SHARED_LIBS OFF)
@@ -76,10 +77,7 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 target_include_directories(amr2vdb PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_include_directories(amr2vdb PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/include/)
 
-
 # Link Deps ====================================================================
-
-
 
 find_package(AMReX REQUIRED)
 find_package(PelePhysics REQUIRED)
@@ -87,20 +85,20 @@ find_package(PelePhysics REQUIRED)
 list(PREPEND CMAKE_MODULE_PATH "${THIRD_PARTY_DIR}/lib/cmake/OpenVDB/")
 list(PREPEND CMAKE_MODULE_PATH "${THIRD_PARTY_DIR}/lib64/cmake/OpenVDB/")
 set(Boost_USE_STATIC_LIBS ON)
-find_package(OpenVDB REQUIRED)
+find_package(TBB REQUIRED)
 
 find_library(blosc_lib blosc ${THIRD_PARTY_DIR}/lib)
+find_library(openvdb_lib openvdb ${THIRD_PARTY_DIR}/lib)
+find_library(boost_io boost_iostreams ${THIRD_PARTY_DIR}/lib)
 
 find_package(spdlog)
 
 target_link_libraries(amr2vdb PRIVATE
     AMReX::amrex_3d
     PelePhysics::PelePhysics-drm19-Fuego-Simple
-    TBB::tbb OpenVDB::openvdb
+    TBB::tbb ${openvdb_lib} ${boost_io}
     ${blosc_lib} spdlog::spdlog
 )
-
-
 
 # IDE Helpers ==================================================================
 
