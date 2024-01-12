@@ -627,6 +627,7 @@ int amr_to_volume(Arguments const& c) {
         }
 
         if (multires.plain_grid) {
+            multires.plain_grid->setName(multires.name);
             completed[multires.name] = multires.plain_grid;
         }
     }
