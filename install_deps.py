@@ -545,7 +545,7 @@ def cmake_strategy(source: Source):
     print("Built. Installing...")
 
     install_command = ["--build", source.package_build_dir]
-    install_command += ["--target install"]
+    install_command += ["--target", "install"]
 
     run_cmake_command(install_command)
 

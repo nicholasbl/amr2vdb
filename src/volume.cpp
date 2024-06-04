@@ -44,7 +44,8 @@ const char* to_string(SampleType type) {
 /// Intermediate multiresolution grid, ready for interpolation
 struct SampledGrid {
     std::string       name;
-    FloatMultiGridPtr grid;
+    FloatMultiGridPtr multi_grid;
+    FloatGridPtr      plain_grid;
 };
 
 /// Extraction result
@@ -185,6 +186,39 @@ struct ConversionState {
         return true;
     }
 
+    void extract_level(int                     current_level,
+                       std::span<FloatGridPtr> per_var_grid) const {
+
+        // Get all the var-vdbs at the appropriate level, along with
+        // accessors
+        std::vector<FloatGrid::Accessor> per_var_accessor;
+
+        per_var_accessor.reserve(per_var_grid.size());
+
+        for (auto& mg : per_var_grid) {
+            per_var_accessor.push_back(mg->getAccessor());
+        }
+
+        auto const& ba = plt_data->getGrid(current_level);
+
+        auto const& mf = plt_data->get_data(current_level);
+
+        // We can now iterate the AMR at this level
+        auto iter = amrex::MFIter(mf);
+
+        spdlog::debug("Iterating blocks...");
+
+        for (; iter.isValid(); ++iter) {
+            auto const& box = iter.validbox();
+
+            amrex::FArrayBox const& fab = mf[iter];
+
+            auto const& a = fab.array();
+
+            loop_box(box, a, per_var_accessor, var_ids);
+        }
+    }
+
     /// Execute a copy from AMR to multires VDBs
     Result write_to_vdbs() const {
         spdlog::info("Extracting AMR to Multires VDB");
@@ -201,73 +235,68 @@ struct ConversionState {
         spdlog::info("Domain H: {} {} {}", harray[0], harray[1], harray[2]);
         spdlog::info("Var Num:  {}", plt_data->getVariableList().size());
 
-        // This is a bit silly, but we just make a big list of vdbs that
-        // correspond to our list of desired variables
-        std::vector<FloatMultiGrid::Ptr> vdb_grids;
-
-        for (size_t i = 0; i < var_ids.size(); i++) {
-            auto g =
-                std::make_shared<FloatMultiGrid>(config.max_level + 1, 0.0f);
-            vdb_grids.push_back(g);
-        }
-
-
-        // note the <= here
-        for (int current_level = 0; current_level <= config.max_level;
-             current_level++) {
-            spdlog::info("Working on AMR level {}", current_level);
-            // also note that VDB does inverse resolution order. 0 is the
-            // finest. so we want to map, say 3 -> 0 and 0 -> 3
-
-            size_t vdb_mapped_level = (config.max_level - current_level);
-
-            spdlog::debug("Mapping to VDB level {}", vdb_mapped_level);
-
-            // Get all the var-vdbs at the appropriate level, along with
-            // accessors
-            std::vector<FloatGridPtr>        per_var_grid;
-            std::vector<FloatGrid::Accessor> per_var_accessor;
-
-            per_var_grid.reserve(vdb_grids.size());
-            per_var_accessor.reserve(vdb_grids.size());
-
-            for (auto& mg : vdb_grids) {
-                auto grid = mg->grid(vdb_mapped_level);
-
-                assert(!!grid);
-
-                per_var_grid.push_back(grid);
-                per_var_accessor.push_back(grid->getAccessor());
-            }
-
-            auto const& ba = plt_data->getGrid(current_level);
-
-            auto const& mf = plt_data->get_data(current_level);
-
-            // We can now iterate the AMR at this level
-            auto iter = amrex::MFIter(mf);
-
-            spdlog::debug("Iterating blocks...");
-
-            for (; iter.isValid(); ++iter) {
-                auto const& box = iter.validbox();
-
-                amrex::FArrayBox const& fab = mf[iter];
-
-                auto const& a = fab.array();
-
-                loop_box(box, a, per_var_accessor, var_ids);
-            }
-        }
-
-        spdlog::info("Sampling complete");
-
-        // Transform output a bit to simplify things
-
         std::vector<SampledGrid> ret_grid;
 
-        for (int i = 0; i < vdb_grids.size(); i++) {
-            ret_grid.emplace_back(SampledGrid { var_names[i], vdb_grids[i] });
+        if (config.max_level > 0) {
+            // we have to do some resampling
+
+            // This is a bit silly, but we just make a big list of vdbs that
+            // correspond to our list of desired variables
+            std::vector<FloatMultiGrid::Ptr> per_var_multivdb_grids;
+
+            for (size_t i = 0; i < var_ids.size(); i++) {
+                auto g = std::make_shared<FloatMultiGrid>(config.max_level + 1,
+                                                          0.0f);
+                per_var_multivdb_grids.push_back(g);
+            }
+
+
+            // note the <= here
+            for (int current_level = 0; current_level <= config.max_level;
+                 current_level++) {
+                spdlog::info("Working on AMR level {}", current_level);
+                // also note that VDB does inverse resolution order. 0 is the
+                // finest. so we want to map, say 3 -> 0 and 0 -> 3
+                size_t vdb_mapped_level = (config.max_level - current_level);
+                spdlog::debug("Mapping to VDB level {}", vdb_mapped_level);
+
+                std::vector<FloatGridPtr> local_grids;
+
+                for (auto& g : per_var_multivdb_grids) {
+                    local_grids.push_back(g->grid(vdb_mapped_level));
+                }
+
+                extract_level(current_level, local_grids);
+            }
+
+            spdlog::info("Sampling complete");
+
+            // Transform output a bit to simplify things
+
+            for (int i = 0; i < per_var_multivdb_grids.size(); i++) {
+                ret_grid.emplace_back(SampledGrid {
+                    var_names[i],
+                    per_var_multivdb_grids[i],
+                });
+            }
+        } else {
+            // we shall be doing no resampling
+
+            std::vector<FloatGridPtr> local_grids;
+
+            for (size_t i = 0; i < var_ids.size(); i++) {
+                auto g = FloatGrid::create(0.0f);
+                local_grids.push_back(g);
+            }
+
+            extract_level(0, local_grids);
+
+            for (size_t i = 0; i < var_ids.size(); i++) {
+                ret_grid.emplace_back(SampledGrid {
+                    .name       = var_names[i],
+                    .plain_grid = local_grids.at(i),
+                });
+            }
         }
 
         // If the user asked for an AMR structure grid, execute that and add it
@@ -287,7 +316,8 @@ struct ConversionState {
         return ret;
     }
 
-    /// Save the AMR struture. This creates a float grid VDB, where every voxel
+    /// Save the AMR struture. This creates a float multi_grid VDB, where every
+    /// voxel
     /// is the finest level of the AMR refinement at that spot
     SampledGrid save_amr() const {
         spdlog::info("Building AMR structure grid...");
@@ -326,8 +356,8 @@ struct ConversionState {
         }
 
         return {
-            .name = config.save_amr.value(),
-            .grid = g,
+            .name       = config.save_amr.value(),
+            .multi_grid = g,
         };
     }
 };
@@ -424,23 +454,25 @@ std::vector<FloatGridPtr> make_grids(int level) {
 }
 
 
-/// Take an AMR styled VDB grid and resample into a single uniform grid.
+/// Take an AMR styled VDB multi_grid and resample into a single uniform
+/// multi_grid.
 ///
 /// This requires care. AMR only has the blocks that matter at a refinement
 /// level. VDB expects their multires data to be like a mipmap, where all the
 /// coarse levels are mirrors (at lower res) of the finest level. So to make a
-/// uniform grid with the tools VDB has, we go level by level, interpolating
-/// coarser information first, then copying over the AMR data at that level.
+/// uniform multi_grid with the tools VDB has, we go level by level,
+/// interpolating coarser information first, then copying over the AMR data at
+/// that level.
 ///
 /// This function can also do some smoothing; coarse data can get pretty blocky,
 /// so we can optionally smooth levels or at the end. Smoothing does change the
 /// domain, so a clip box is provided to restrict the output VDB
 ///
-/// \param source Multires grid to pack into a uniform grid
+/// \param source Multires multi_grid to pack into a uniform multi_grid
 /// \param box Box to clip the data to
 /// \param type Interpolation sampling type
 /// \param opts Options for smoothing/blurring
-/// \return A uniform grid at the finest resolution of the input
+/// \return A uniform multi_grid at the finest resolution of the input
 ///
 FloatGridPtr resample(SampledGrid    source,
                       openvdb::BBoxd box,
@@ -448,8 +480,8 @@ FloatGridPtr resample(SampledGrid    source,
                       BlurArgs       opts) {
     spdlog::info("Resampling {} to fine grid", source.name);
 
-    // interpolate from coarse to fine to this grid
-    int max_levels = source.grid->numLevels();
+    // interpolate from coarse to fine to this multi_grid
+    int max_levels = source.multi_grid->numLevels();
     int level      = max_levels;
 
     // create new grid
@@ -458,7 +490,7 @@ FloatGridPtr resample(SampledGrid    source,
     while (level-- > 0) {
         spdlog::info("Packing {}", level);
 
-        auto in_grid  = source.grid->grid(level);
+        auto in_grid  = source.multi_grid->grid(level);
         auto out_grid = new_multi_grid.at(level);
 
         spdlog::debug("In {}", in_grid->activeVoxelCount());
@@ -496,7 +528,7 @@ FloatGridPtr resample(SampledGrid    source,
 
 
         // copy over new data
-        openvdb::tools::compReplace(*out_grid, *source.grid->grid(level));
+        openvdb::tools::compReplace(*out_grid, *source.multi_grid->grid(level));
 
         spdlog::debug("Storing to level {}", level);
         spdlog::debug("Out resampled with {}", out_grid->activeVoxelCount());
@@ -544,7 +576,7 @@ int amr_to_volume(Arguments const& c) {
         config.variables.insert(var.as_string());
     }
 
-    auto amr = load_file(source_plt, config);
+    auto loaded_amr_grids = load_file(source_plt, config);
 
     auto sample_type =
         toml::find_or<std::string>(amr_config_node, "sample", "triquad");
@@ -564,30 +596,40 @@ int amr_to_volume(Arguments const& c) {
 
     GridMap completed;
 
-    for (auto& multires : amr.grids) {
+    for (auto& multires : loaded_amr_grids.grids) {
         // check if there is a per-variable override
 
-        BlurArgs local_blur_args = opts;
+        if (multires.multi_grid) {
 
-        if (amr_config_node.contains(multires.name)) {
-            spdlog::info("Using custom options for variable {}", multires.name);
+            BlurArgs local_blur_args = opts;
 
-            auto local_config = toml::find(amr_config_node, multires.name);
+            if (amr_config_node.contains(multires.name)) {
+                spdlog::info("Using custom options for variable {}",
+                             multires.name);
 
-            auto local_blur_config =
-                toml::find_or(local_config, "blur", toml::value());
+                auto local_config = toml::find(amr_config_node, multires.name);
 
-            if (local_blur_config.is_table()) {
-                auto base = blur_config_node;
-                merge_values(base, local_blur_config);
+                auto local_blur_config =
+                    toml::find_or(local_config, "blur", toml::value());
 
-                local_blur_args = BlurArgs::from_toml(base);
+                if (local_blur_config.is_table()) {
+                    auto base = blur_config_node;
+                    merge_values(base, local_blur_config);
+
+                    local_blur_args = BlurArgs::from_toml(base);
+                }
             }
+
+            auto new_grid = resample(
+                multires, loaded_amr_grids.bbox, type, local_blur_args);
+            multires.multi_grid.reset(); // try to minimize mem usage
+            completed[new_grid->getName()] = new_grid;
         }
 
-        auto new_grid = resample(multires, amr.bbox, type, local_blur_args);
-        multires.grid.reset(); // try to minimize mem usage
-        completed[new_grid->getName()] = new_grid;
+        if (multires.plain_grid) {
+            multires.plain_grid->setName(multires.name);
+            completed[multires.name] = multires.plain_grid;
+        }
     }
 
     if (c.root.contains("post")) { postprocess(c.root, completed); }
