@@ -1,6 +1,11 @@
 #pragma once
 
-struct Arguments;
+namespace sol {
+class state;
+}
 
-/// Turn an AMR grid into a VDB volume
-int amr_to_volume(Arguments const& c);
+namespace volume {
+
+void register_functions(sol::state&);
+
+}

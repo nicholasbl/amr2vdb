@@ -1,5 +1,6 @@
 #include "volume.h"
 
+#include "amr_basic.h"
 #include "amr_common.h"
 #include "argparse.h"
 #include "lzs3d.h"
@@ -21,9 +22,10 @@
 #include <openvdb/tools/GridTransformer.h>
 #include <openvdb/tools/MultiResGrid.h>
 
-
 #include <array>
 #include <span>
+
+namespace volume {
 
 /// Type of sampling to use during interpolation
 enum class SampleType {
@@ -50,8 +52,8 @@ struct SampledGrid {
 
 /// Extraction result
 struct Result {
-    openvdb::BBoxd           bbox;
-    std::vector<SampledGrid> grids;
+    openvdb::BBoxd bbox;
+    SampledGrid    grid;
 };
 
 /// Take an AMR box, and copy selected variables of that box to an AMR accessor
@@ -63,8 +65,8 @@ struct Result {
 ///
 static void loop_box(amrex::Box const&                       bx,
                      amrex::Array4<amrex::Real const> const& a,
-                     std::span<openvdb::FloatGrid::Accessor> accessors,
-                     std::span<int const>                    var_indices) {
+                     openvdb::FloatGrid::Accessor            accessor,
+                     int const                               var_index) {
 
     const auto lo = lbound(bx);
     const auto hi = ubound(bx);
@@ -72,16 +74,11 @@ static void loop_box(amrex::Box const&                       bx,
     for (int k = lo.z; k <= hi.z; ++k) {
         for (int j = lo.y; j <= hi.y; ++j) {
             for (int i = lo.x; i <= hi.x; ++i) {
+                float value = *a.ptr(i, j, k, var_index);
 
-                for (int offset = 0; offset < var_indices.size(); offset++) {
-                    auto index = var_indices[offset];
+                accessor.setValue({ i, j, k }, value);
 
-                    float value = *a.ptr(i, j, k, index);
-
-                    accessors[offset].setValue({ i, j, k }, value);
-
-                    assert(accessors[offset].getValue({ i, j, k }) == value);
-                }
+                assert(accessors[offset].getValue({ i, j, k }) == value);
             }
         }
     }
@@ -114,14 +111,14 @@ static void loop_box_constant(amrex::Box const&             bx,
 /// The ConversionState class models the settings and state for a conversion
 ///
 struct ConversionState {
-    VolumeConfig  config;
+    VolumeConfig config;
 
-    std::unique_ptr<LocalPlotFile> plt_data;
+    amr_basic::LocalPlotFilePtr plt_data;
 
-    /// Requested variable names
-    std::vector<std::string> var_names;
-    /// Corresponding variable ids in the AMR
-    std::vector<int>         var_ids;
+    /// Requested variable name
+    std::string var_name;
+    /// Corresponding variable id in the AMR
+    int var_id = -1;
 
     ConversionState(VolumeConfig c) : config(c) { }
 
@@ -130,78 +127,57 @@ struct ConversionState {
     /// \param path Pltfile path
     /// \return True if Pltfile could be opened
     ///
-    bool init(std::filesystem::path path) {
-        if (!std::filesystem::exists(path)) {
-            spdlog::error("Path does not exist: {}", path.string());
+    bool init(amr_basic::LocalPlotFilePtr ptr) {
+        spdlog::info("Initializing extraction");
+        plt_data      = ptr;
+        auto plt_vars = amr_basic::get_variable_list(plt_data);
+
+        // Figure out which var we were asked for, and where they are in the plt
+        for (long i = 0; i < plt_vars.size(); i++) {
+            auto const& vname = plt_vars[i];
+            if (config.variable == vname) {
+                spdlog::info("Variable {} is at index {}", vname, i);
+                var_name = vname;
+                var_id   = i;
+            }
+        }
+
+        if (var_id < 0) {
+            spdlog::error("Unable to find variable {}", config.variable);
             return false;
         }
 
-        plt_data      = std::make_unique<LocalPlotFile>(path);
-        auto plt_vars = plt_data->getVariableList();
-
-        // Figure out which vars were asked for, and where they are in the plt
-
-        {
-            std::set<std::string> extant_names(plt_vars.begin(),
-                                               plt_vars.end());
-
-            for (auto const& vname : config.variables) {
-                if (!extant_names.contains(vname)) {
-                    spdlog::error("Variable {} does not exist in pltfile.",
-                                  vname);
-                    return false;
-                }
-            }
-        }
-
-        spdlog::info("Loading from {}", path.string());
-
-        for (long i = 0; i < plt_vars.size(); i++) {
-            auto const& vname = plt_vars[i];
-            if (config.variables.contains(vname)) {
-                spdlog::info("Variable {} is at index {}", vname, i);
-                var_names.push_back(vname);
-                var_ids.push_back(i);
-            }
-        }
-
         if (config.max_level < 0) {
-            config.max_level = plt_data->getNlev() - 1;
+            config.max_level = amr_basic::get_manager(plt_data).getNlev() - 1;
         }
 
-        if (config.max_level >= plt_data->getNlev()) {
+        if (config.max_level >= amr_basic::get_manager(plt_data).getNlev()) {
             spdlog::error(
                 "Asking for refinement level {} but pltfile only has {}",
                 config.max_level,
-                plt_data->getNlev());
+                amr_basic::get_manager(plt_data).getNlev());
             return false;
         }
 
         // Pull plt data in core. The API suggests that this pulls in ALL the
         // data, so watch out
-        plt_data->readPlotFileData();
+        amr_basic::get_manager(plt_data).readPlotFileData();
 
         spdlog::info("Done.");
 
         return true;
     }
 
-    void extract_level(int                     current_level,
-                       std::span<FloatGridPtr> per_var_grid) const {
+    void extract_level(int current_level, FloatGridPtr var_grid) {
 
         // Get all the var-vdbs at the appropriate level, along with
         // accessors
-        std::vector<FloatGrid::Accessor> per_var_accessor;
+        auto per_var_accessor = var_grid->getAccessor();
 
-        per_var_accessor.reserve(per_var_grid.size());
+        auto const& ba =
+            amr_basic::get_manager(plt_data).getGrid(current_level);
 
-        for (auto& mg : per_var_grid) {
-            per_var_accessor.push_back(mg->getAccessor());
-        }
-
-        auto const& ba = plt_data->getGrid(current_level);
-
-        auto const& mf = plt_data->get_data(current_level);
+        auto const& mf = amr_basic::get_multifab_at(plt_data, current_level);
 
         // We can now iterate the AMR at this level
         auto iter = amrex::MFIter(mf);
@@ -215,14 +191,14 @@ struct ConversionState {
 
             auto const& a = fab.array();
 
-            loop_box(box, a, per_var_accessor, var_ids);
+            loop_box(box, a, per_var_accessor, var_id);
         }
     }
 
     /// Execute a copy from AMR to multires VDBs
-    Result write_to_vdbs() const {
+    Result write_to_vdbs() {
         spdlog::info("Extracting AMR to Multires VDB");
-        auto geom = plt_data->getGeom(config.max_level);
+        auto geom = get_manager(plt_data).getGeom(config.max_level);
 
         auto domain = geom.Domain();
         auto larray = domain.smallEnd().toArray();
@@ -233,23 +209,15 @@ struct ConversionState {
         spdlog::info("Level:    {}", config.max_level);
         spdlog::info("Domain L: {} {} {}", larray[0], larray[1], larray[2]);
         spdlog::info("Domain H: {} {} {}", harray[0], harray[1], harray[2]);
-        spdlog::info("Var Num:  {}", plt_data->getVariableList().size());
+        spdlog::info("Var Num:  {}", get_variable_list(plt_data).size());
 
-        std::vector<SampledGrid> ret_grid;
+        SampledGrid ret_grid;
 
         if (config.max_level > 0) {
             // we have to do some resampling
 
-            // This is a bit silly, but we just make a big list of vdbs that
-            // correspond to our list of desired variables
-            std::vector<FloatMultiGrid::Ptr> per_var_multivdb_grids;
-
-            for (size_t i = 0; i < var_ids.size(); i++) {
-                auto g = std::make_shared<FloatMultiGrid>(config.max_level + 1,
-                                                          0.0f);
-                per_var_multivdb_grids.push_back(g);
-            }
-
+            auto multivdb_grid =
+                std::make_shared<FloatMultiGrid>(config.max_level + 1, 0.0f);
 
             // note the <= here
             for (int current_level = 0; current_level <= config.max_level;
@@ -260,54 +228,41 @@ struct ConversionState {
                 size_t vdb_mapped_level = (config.max_level - current_level);
                 spdlog::debug("Mapping to VDB level {}", vdb_mapped_level);
 
-                std::vector<FloatGridPtr> local_grids;
+                FloatGridPtr local_grid = multivdb_grid->grid(vdb_mapped_level);
 
-                for (auto& g : per_var_multivdb_grids) {
-                    local_grids.push_back(g->grid(vdb_mapped_level));
-                }
-
-                extract_level(current_level, local_grids);
+                extract_level(current_level, local_grid);
             }
 
             spdlog::info("Sampling complete");
 
             // Transform output a bit to simplify things
 
-            for (int i = 0; i < per_var_multivdb_grids.size(); i++) {
-                ret_grid.emplace_back(SampledGrid {
-                    var_names[i],
-                    per_var_multivdb_grids[i],
-                });
-            }
+            ret_grid = SampledGrid {
+                var_name,
+                multivdb_grid,
+            };
         } else {
             // we shall be doing no resampling
 
-            std::vector<FloatGridPtr> local_grids;
+            auto local_grid = FloatGrid::create(0.0f);
 
-            for (size_t i = 0; i < var_ids.size(); i++) {
-                auto g = FloatGrid::create(0.0f);
-                local_grids.push_back(g);
-            }
+            extract_level(0, local_grid);
 
-            extract_level(0, local_grids);
-
-            for (size_t i = 0; i < var_ids.size(); i++) {
-                ret_grid.emplace_back(SampledGrid {
-                    .name       = var_names[i],
-                    .plain_grid = local_grids.at(i),
-                });
-            }
+            ret_grid = SampledGrid {
+                .name       = var_name,
+                .plain_grid = local_grid,
+            };
         }
 
         // If the user asked for an AMR structure grid, execute that and add it
         // in
 
-        if (config.save_amr) { ret_grid.push_back(save_amr()); }
+        // if (config.save_amr) { ret_grid.push_back(save_amr()); }
 
         Result ret;
 
-        ret.grids = std::move(ret_grid);
-        ret.bbox  = {
+        ret.grid = ret_grid;
+        ret.bbox = {
             { (double)larray[0], (double)larray[1], (double)larray[2] },
             { (double)harray[0], (double)harray[1], (double)harray[2] }
         };
@@ -319,7 +274,7 @@ struct ConversionState {
     /// Save the AMR struture. This creates a float multi_grid VDB, where every
     /// voxel
     /// is the finest level of the AMR refinement at that spot
-    SampledGrid save_amr() const {
+    SampledGrid save_amr() {
         spdlog::info("Building AMR structure grid...");
         auto g = std::make_shared<FloatMultiGrid>(config.max_level + 1, 0.0f);
 
@@ -334,9 +289,9 @@ struct ConversionState {
             FloatGridPtr        per_var_grid     = g->grid(vdb_mapped_level);
             FloatGrid::Accessor per_var_accessor = per_var_grid->getAccessor();
 
-            auto const& ba = plt_data->getGrid(current_level);
+            auto const& ba = get_manager(plt_data).getGrid(current_level);
 
-            auto const& mf = plt_data->get_data(current_level);
+            auto const& mf = get_multifab_at(plt_data, current_level);
 
             auto iter = amrex::MFIter(mf);
 
@@ -648,3 +603,7 @@ int amr_to_volume(Arguments const& c) {
 
     return EXIT_SUCCESS;
 }
+
+void register_functions(sol::state&) { }
+
+} // namespace volume

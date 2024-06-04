@@ -16,16 +16,6 @@ project(
     LANGUAGES C CXX
 )
 
-# we need fortran for AMReX data services. Don't ask me why.
-
-# hack for clangd
-#set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE INTERNAL "")
-#if(CMAKE_EXPORT_COMPILE_COMMANDS)
-#  set(CMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES
-#      ${CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES})
-#endif()
-# end hack for clangd
-
 # Depends ======================================================================
 
 include(cmake/CPM.cmake)
@@ -36,6 +26,22 @@ CPMAddPackage(
   GITHUB_REPOSITORY TheLartians/GroupSourcesByFolder.cmake
   VERSION 1.0
 )
+
+CPMAddPackage(
+  NAME lua
+  GIT_REPOSITORY https://github.com/lua/lua.git
+  VERSION 5.4.6
+  DOWNLOAD_ONLY YES
+)
+
+if(lua_ADDED)
+  file(GLOB lua_sources ${lua_SOURCE_DIR}/*.c)
+  list(REMOVE_ITEM lua_sources "${lua_SOURCE_DIR}/lua.c" "${lua_SOURCE_DIR}/luac.c")
+  add_library(lua STATIC ${lua_sources})
+  target_include_directories(lua SYSTEM PUBLIC $<BUILD_INTERFACE:${lua_SOURCE_DIR}>)
+endif()
+
+CPMAddPackage("gh:ThePhD/sol2@3.3.0")
 
 # Create BIN ===============================================================
 
@@ -54,6 +60,8 @@ add_executable(amr2vdb
     src/postprocess.h src/postprocess.cpp
     src/argparse.cpp
     src/special.h src/special.cpp
+    src/amr_basic.cpp src/amr_basic.h
+    src/use_sol.h
 )
 
 set(BUILD_SHARED_LIBS OFF)
@@ -67,8 +75,10 @@ else ()
     set (X86 FALSE)
 endif ()
 
-target_compile_options(amr2vdb PUBLIC -fsanitize=address)
-target_link_options(amr2vdb PUBLIC  -fsanitize=address)
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_compile_options(amr2vdb PUBLIC -fsanitize=address)
+    target_link_options(amr2vdb PUBLIC  -fsanitize=address)
+endif()
 
 # Source Files =================================================================
 
@@ -100,6 +110,7 @@ target_link_libraries(amr2vdb PRIVATE
     PelePhysics::PelePhysics-drm19-Fuego-Simple
     TBB::tbb ${openvdb_lib} ${boost_io}
     ${blosc_lib} spdlog::spdlog ${zstd_lib} ${z_lib}
+    sol2 lua
 )
 
 # IDE Helpers ==================================================================

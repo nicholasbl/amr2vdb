@@ -40,36 +40,12 @@ struct AMRState {
     ~AMRState() { amrex::Finalize(amr); }
 };
 
-/// This class is an extension of PltFileManager, providing access to useful
-/// members that are not exposed by default.
-struct LocalPlotFile : public pele::physics::pltfilemanager::PltFileManager {
-public:
-    LocalPlotFile(std::filesystem::path path)
-        : pele::physics::pltfilemanager::PltFileManager(path) { }
-
-    ~LocalPlotFile() = default;
-
-    LocalPlotFile(LocalPlotFile const&)                  = delete;
-    LocalPlotFile const& operator=(LocalPlotFile const&) = delete;
-    LocalPlotFile(LocalPlotFile&&)                       = delete;
-    LocalPlotFile const& operator=(LocalPlotFile&&)      = delete;
-
-    /// Obtain the list of multifabs, to be indexed by refinement level
-    auto const& all_data() const { return m_data; }
-
-    /// Obtain the multifab at a refinement level
-    auto const& get_data(int nlvl) { return m_data.at(nlvl); }
-
-    /// Obtain the distribution mapping at a given refinement level
-    auto const& get_dmap(int nlvl) { return m_dmaps.at(nlvl); }
-};
-
 /// Configuration for a volume extraction
 struct VolumeConfig {
     /// Max level of refinement to read
-    int                        max_level = -1;
+    int max_level = -1;
     /// Variable names to extract
-    std::set<std::string>      variables;
+    std::string variable;
     /// Optionally, save the AMR structure in the extraction with the given name
     std::optional<std::string> save_amr;
 };

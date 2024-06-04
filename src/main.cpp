@@ -5,11 +5,11 @@
 #include "volume2.h"
 
 #include <cstdlib>
-#include <iostream>
 #include <string>
-#include <vector>
 
 #include <openvdb/openvdb.h>
+
+#include "use_sol.h"
 
 #include "spdlog/spdlog.h"
 
@@ -18,27 +18,40 @@ int main(int argc, char** argv) {
 
     openvdb::initialize();
 
+    sol::state lua;
+
+    lua.open_libraries(sol::lib::base, sol::lib::package, sol::lib::io);
+
     std::deque<std::string> arguments = { argv + 1, argv + argc };
 
     if (arguments.empty()) return EXIT_FAILURE;
 
-    auto args = Arguments::parse(std::move(arguments));
+    std::string script_name = arguments.at(0);
 
-    auto cfg = toml::format(args.root);
+    arguments.pop_front();
 
-    spdlog::info("Configuration: {}", cfg);
+    bool use_debug = false;
 
-    if (args.root.contains("debug")) {
+    auto debug_env = std::getenv("DEBUG");
+
+    if (debug_env) { use_debug = std::atoi(debug_env); }
+
+    if (use_debug) {
         spdlog::info("Enable debug output");
         spdlog::set_level(spdlog::level::debug);
     } else {
         spdlog::set_level(spdlog::level::info);
     }
 
-    if (args.root.contains("amr")) { return amr_to_volume(args); }
-    if (args.root.contains("flatten")) { return flatten_to_vdb(args); }
-    if (args.root.contains("mesh")) { return mesh_to_volume(args); }
-    if (args.root.contains("all_iso_merge")) { return all_iso_merge(args); }
+    lua["args"] = arguments;
 
-    spdlog::error("no command given");
+    lua.script_file(script_name);
+
+
+    // if (args.root.contains("amr")) { return amr_to_volume(args); }
+    // if (args.root.contains("flatten")) { return flatten_to_vdb(args); }
+    // if (args.root.contains("mesh")) { return mesh_to_volume(args); }
+    // if (args.root.contains("all_iso_merge")) { return all_iso_merge(args); }
+
+    // spdlog::error("no command given");
 }
