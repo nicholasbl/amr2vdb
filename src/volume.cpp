@@ -225,7 +225,13 @@ struct ConversionState {
                 openvdb::CoordBBox(openvdb::Coord(l0), openvdb::Coord(l1));
         }
 
-        spdlog::debug("Level BB: {}", level_bb);
+        spdlog::debug("Level BB: {} {} {} - {} {} {}",
+                      level_bb.min().x(),
+                      level_bb.min().y(),
+                      level_bb.min().z(),
+                      level_bb.max().x(),
+                      level_bb.max().y(),
+                      level_bb.max().z());
 
 
         for (; iter.isValid(); ++iter) {
