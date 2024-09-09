@@ -44,8 +44,8 @@ const char* to_string(SampleType type) {
 /// Intermediate multiresolution grid, ready for interpolation
 struct SampledGrid {
     std::string       name;
-    FloatMultiGridPtr multi_grid;
-    FloatGridPtr      plain_grid;
+    FloatMultiGridPtr multi_grid = nullptr;
+    FloatGridPtr      plain_grid = nullptr;
 };
 
 /// Extraction result
@@ -54,7 +54,7 @@ struct Result {
     std::vector<SampledGrid> grids;
 };
 
-/// Take an AMR box, and copy selected variables of that box to an AMR accessor
+/// Take an AMR box, and copy selected variables of that box to a VDB accessor
 ///
 /// \param bx AMR box
 /// \param a AMR box data
@@ -64,7 +64,8 @@ struct Result {
 static void loop_box(amrex::Box const&                       bx,
                      amrex::Array4<amrex::Real const> const& a,
                      std::span<openvdb::FloatGrid::Accessor> accessors,
-                     std::span<int const>                    var_indices) {
+                     std::span<int const>                    var_indices,
+                     openvdb::CoordBBox const&               keep) {
 
     const auto lo = lbound(bx);
     const auto hi = ubound(bx);
@@ -72,6 +73,8 @@ static void loop_box(amrex::Box const&                       bx,
     for (int k = lo.z; k <= hi.z; ++k) {
         for (int j = lo.y; j <= hi.y; ++j) {
             for (int i = lo.x; i <= hi.x; ++i) {
+
+                if (!keep.isInside(openvdb::Coord(i, j, k))) continue;
 
                 for (int offset = 0; offset < var_indices.size(); offset++) {
                     auto index = var_indices[offset];
@@ -208,6 +211,21 @@ struct ConversionState {
 
         spdlog::debug("Iterating blocks...");
 
+        auto level_bb = config.bounding_box.value_or(openvdb::CoordBBox::inf());
+
+        // only do this if there is a bounding box. 'inf' uses real values that
+        // will overflow.
+        if (current_level > 0 and config.bounding_box.has_value()) {
+            openvdb::Vec3I l0 =
+                level_bb.min().asVec3I() * std::pow(2, current_level);
+            openvdb::Vec3I l1 =
+                level_bb.max().asVec3I() * std::pow(2, current_level);
+
+            level_bb =
+                openvdb::CoordBBox(openvdb::Coord(l0), openvdb::Coord(l1));
+        }
+
+
         for (; iter.isValid(); ++iter) {
             auto const& box = iter.validbox();
 
@@ -215,7 +233,7 @@ struct ConversionState {
 
             auto const& a = fab.array();
 
-            loop_box(box, a, per_var_accessor, var_ids);
+            loop_box(box, a, per_var_accessor, var_ids, level_bb);
         }
     }
 
@@ -574,6 +592,23 @@ int amr_to_volume(Arguments const& c) {
 
     for (auto const& var : source_vars) {
         config.variables.insert(var.as_string());
+    }
+
+    if (amr_config_node.contains("clip_coarse")) {
+        auto clip_node = toml::find(amr_config_node, "clip_coarse");
+
+        auto min = toml::find(clip_node, "min").as_array();
+        auto max = toml::find(clip_node, "max").as_array();
+
+        auto min_v = openvdb::Coord(min.at(0).as_integer(),
+                                    min.at(1).as_integer(),
+                                    min.at(2).as_integer());
+
+        auto max_v = openvdb::Coord(max.at(0).as_integer(),
+                                    max.at(1).as_integer(),
+                                    max.at(2).as_integer());
+
+        config.bounding_box = openvdb::CoordBBox(min_v, max_v);
     }
 
     auto loaded_amr_grids = load_file(source_plt, config);

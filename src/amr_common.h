@@ -68,8 +68,13 @@ public:
 struct VolumeConfig {
     /// Max level of refinement to read
     int                        max_level = -1;
+
     /// Variable names to extract
     std::set<std::string>      variables;
+
     /// Optionally, save the AMR structure in the extraction with the given name
     std::optional<std::string> save_amr;
+
+    /// Optionally bound the input AMR dataset
+    std::optional<openvdb::CoordBBox> bounding_box;
 };
