@@ -54,6 +54,7 @@ add_executable(amr2vdb
     src/postprocess.h src/postprocess.cpp
     src/argparse.cpp
     src/special.h src/special.cpp
+    src/points.h src/points.cpp
 )
 
 set(BUILD_SHARED_LIBS OFF)
@@ -67,8 +68,10 @@ else ()
     set (X86 FALSE)
 endif ()
 
-target_compile_options(amr2vdb PUBLIC -fsanitize=address)
-target_link_options(amr2vdb PUBLIC  -fsanitize=address)
+if  (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_compile_options(amr2vdb PUBLIC -fsanitize=address)
+    target_link_options(amr2vdb PUBLIC  -fsanitize=address)
+endif()
 
 # Source Files =================================================================
 
@@ -87,8 +90,10 @@ list(PREPEND CMAKE_MODULE_PATH "${THIRD_PARTY_DIR}/lib64/cmake/OpenVDB/")
 set(Boost_USE_STATIC_LIBS ON)
 find_package(TBB REQUIRED)
 
+SET(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+
 find_library(zstd_lib zstd ${THIRD_PARTY_DIR}/lib)
-find_library(z_lib z ${THIRD_PARTY_DIR}/lib)
+find_library(z_lib NAMES z.a z ${THIRD_PARTY_DIR}/lib)
 find_library(blosc_lib blosc ${THIRD_PARTY_DIR}/lib)
 find_library(openvdb_lib openvdb ${THIRD_PARTY_DIR}/lib)
 find_library(boost_io boost_iostreams ${THIRD_PARTY_DIR}/lib)
@@ -101,6 +106,11 @@ target_link_libraries(amr2vdb PRIVATE
     TBB::tbb ${openvdb_lib} ${boost_io}
     ${blosc_lib} spdlog::spdlog ${zstd_lib} ${z_lib}
 )
+
+message(    AMReX::amrex_3d
+    PelePhysics::PelePhysics-drm19-Fuego-Simple
+    TBB::tbb ${openvdb_lib} ${boost_io}
+    ${blosc_lib} spdlog::spdlog ${zstd_lib} ${z_lib})
 
 # IDE Helpers ==================================================================
 

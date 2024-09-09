@@ -275,8 +275,8 @@ struct ConversionState {
 
             for (int i = 0; i < per_var_multivdb_grids.size(); i++) {
                 ret_grid.emplace_back(SampledGrid {
-                    var_names[i],
-                    per_var_multivdb_grids[i],
+                    .name       = var_names[i],
+                    .multi_grid = per_var_multivdb_grids[i],
                 });
             }
         } else {

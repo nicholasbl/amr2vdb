@@ -1,13 +1,12 @@
 #include "argparse.h"
 #include "mesh_to_volume.h"
+#include "points.h"
 #include "special.h"
 #include "volume.h"
 #include "volume2.h"
 
 #include <cstdlib>
-#include <iostream>
 #include <string>
-#include <vector>
 
 #include <openvdb/openvdb.h>
 
@@ -39,6 +38,7 @@ int main(int argc, char** argv) {
     if (args.root.contains("flatten")) { return flatten_to_vdb(args); }
     if (args.root.contains("mesh")) { return mesh_to_volume(args); }
     if (args.root.contains("all_iso_merge")) { return all_iso_merge(args); }
+    if (args.root.contains("points")) { return txt_to_points(args); }
 
     spdlog::error("no command given");
 }
