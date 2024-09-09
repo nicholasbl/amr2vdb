@@ -502,7 +502,7 @@ void qcrit_1d_vel(std::string vx,
                   std::string vy,
                   std::string vz,
                   GridMap&    grids) {
-    spdlog::debug("Gathering velocity flds...");
+    spdlog::debug("Gathering velocity flds... {} {} {}", vx, vy, vz);
     // get all
     auto vx_grid = cast_to<openvdb::FloatGrid>(find_grid_by_name(vx, grids));
     auto vy_grid = cast_to<openvdb::FloatGrid>(find_grid_by_name(vy, grids));
