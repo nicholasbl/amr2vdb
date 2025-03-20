@@ -1,4 +1,5 @@
 #include "argparse.h"
+#include "export.h"
 #include "mesh_to_volume.h"
 #include "points.h"
 #include "special.h"
@@ -39,6 +40,7 @@ int main(int argc, char** argv) {
     if (args.root.contains("mesh")) { return mesh_to_volume(args); }
     if (args.root.contains("all_iso_merge")) { return all_iso_merge(args); }
     if (args.root.contains("points")) { return txt_to_points(args); }
+    if (args.root.contains("export")) { return export_quantity(args); }
 
     spdlog::error("no command given");
 }

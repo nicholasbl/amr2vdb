@@ -55,6 +55,7 @@ add_executable(amr2vdb
     src/argparse.cpp
     src/special.h src/special.cpp
     src/points.h src/points.cpp
+    src/export.h src/export.cpp
 )
 
 set(BUILD_SHARED_LIBS OFF)
