@@ -3,6 +3,7 @@
 #include "spdlog/spdlog.h"
 
 #include <openvdb/openvdb.h>
+#include <openvdb/tools/Count.h>
 
 namespace vdb = openvdb;
 
@@ -11,16 +12,19 @@ static_assert(sizeof(vdb::Vec3i) == sizeof(int) * 3);
 
 void write_meta(vdb::GridBase::Ptr ptr, std::ofstream& out) {
     auto bb = ptr->evalActiveVoxelBoundingBox();
+    auto dims = bb.dim().asVec3i();
 
     auto min = bb.min().asVec3i();
     auto max = bb.max().asVec3i();
 
     out.write(reinterpret_cast<char*>(&min), sizeof(min));
     out.write(reinterpret_cast<char*>(&max), sizeof(max));
+    out.write(reinterpret_cast<char*>(&dims), sizeof(dims));
 }
 
-template <class T>
+template <class T, class U>
 int write_volume(vdb::GridBase::Ptr ptr,
+                 U                  zero,
                  std::string const& type,
                  std::string const& outname) {
     auto cast_grid = vdb::gridPtrCast<T>(ptr);
@@ -33,9 +37,6 @@ int write_volume(vdb::GridBase::Ptr ptr,
 
     auto bbox = cast_grid->evalActiveVoxelBoundingBox();
     auto dims = cast_grid->evalActiveVoxelDim();
-
-    auto min = bbox.min();
-    auto max = bbox.max();
 
     spdlog::info(
         "Writing grid with dimensions {} {} {}", dims.x(), dims.y(), dims.z());
@@ -50,12 +51,16 @@ int write_volume(vdb::GridBase::Ptr ptr,
 
     write_meta(ptr, outfile);
 
+    auto min_max = vdb::tools::minMax(cast_grid->tree());
+    auto min_val = min_max.min();
+    auto max_val = min_max.max();
+
+    outfile.write(reinterpret_cast<char const*>( &min_val ), sizeof(min_val));
+    outfile.write(reinterpret_cast<char const*>( &max_val ), sizeof(max_val));
+
     constexpr auto BUFFER_SIZE = 1024 * 1024;
 
-    using QType =
-        std::remove_cvref_t<decltype(accessor.getValue(vdb::Coord(0, 0, 0)))>;
-
-    std::vector<QType> buffer;
+    std::vector<U> buffer;
     buffer.resize(BUFFER_SIZE);
 
 
@@ -64,18 +69,17 @@ int write_volume(vdb::GridBase::Ptr ptr,
 
     auto flush = [&outfile, &buffer, &buffer_index]() {
         outfile.write(reinterpret_cast<char*>(buffer.data()),
-                      buffer_index * sizeof(float));
+                      buffer_index * sizeof(U));
         buffer_index = 0;
     };
 
-    for (int z = min.z(); z <= max.z(); ++z) {
-        for (int y = min.y(); y <= max.y(); ++y) {
-            for (int x = min.x(); x <= max.x(); ++x) {
+    for (int z = 0; z < dims.z(); ++z) {
+        for (int y = 0; y < dims.y(); ++y) {
+            for (int x = 0; x < dims.x(); ++x) {
                 openvdb::Coord coord(x, y, z);
 
-                auto value = accessor.isValueOn(coord)
-                                 ? accessor.getValue(coord)
-                                 : QType();
+                auto value =
+                    accessor.isValueOn(coord) ? accessor.getValue(coord) : zero;
 
                 buffer[buffer_index++] = value;
 
@@ -120,9 +124,10 @@ int export_quantity(Arguments const& c) {
     }
 
     if (type == "f32") {
-        return write_volume<vdb::FloatGrid>(ptr, type.str, outname.str);
+        return write_volume<vdb::FloatGrid>(ptr, 0.0f, type.str, outname.str);
     } else if (type == "vec3") {
-        return write_volume<vdb::Vec3SGrid>(ptr, type.str, outname.str);
+        return write_volume<vdb::Vec3SGrid>(
+            ptr, vdb::Vec3f(0, 0, 0), type.str, outname.str);
     }
 
     spdlog::error("Unknown type {}", type.str);
