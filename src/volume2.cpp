@@ -2,13 +2,14 @@
 
 #include "amr_common.h"
 #include "argparse.h"
+#include "pltfilereader.h"
 
 #include <AMReX.H>
 #include <AMReX_FArrayBox.H>
 #include <AMReX_ParmParse.H>
 #include <AMReX_Print.H>
 
-#include <PltFileManager.H>
+#include <spdlog/spdlog.h>
 
 #include <optional>
 
@@ -39,7 +40,7 @@ static void loop_box(amrex::Box const&                       bx,
     }
 }
 
-static FloatGridPtr extract_grid(LocalPlotFile& plt, int var_id) {
+static FloatGridPtr extract_grid(PltFileReader& plt, int var_id) {
     auto geom = plt.getGeom(plt.getNlev() - 1);
 
     auto domain = geom.Domain();
@@ -59,7 +60,8 @@ static FloatGridPtr extract_grid(LocalPlotFile& plt, int var_id) {
     amrex::MultiFab output(grid, dmap, 1, 0);
 
     std::cout << "Interpolating..." << std::endl;
-    plt.fillPatchFromPlt(0, geom, var_id, 0, 1, output);
+    // plt.fillPatchFromPlt(0, geom, var_id, 0, 1, output);
+    spdlog::error("Functionality has been removed");
 
     std::cout << "Transform to VDB..." << std::endl;
 
@@ -94,7 +96,7 @@ static std::optional<Result> load_file(std::filesystem::path path,
         return std::nullopt;
     }
 
-    auto plt_data = std::make_unique<LocalPlotFile>(path);
+    auto plt_data = std::make_unique<PltFileReader>(path);
     auto plt_vars = plt_data->getVariableList();
 
     {

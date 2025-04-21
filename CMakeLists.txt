@@ -16,16 +16,6 @@ project(
     LANGUAGES C CXX
 )
 
-# we need fortran for AMReX data services. Don't ask me why.
-
-# hack for clangd
-#set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE INTERNAL "")
-#if(CMAKE_EXPORT_COMPILE_COMMANDS)
-#  set(CMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES
-#      ${CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES})
-#endif()
-# end hack for clangd
-
 # Depends ======================================================================
 
 include(cmake/CPM.cmake)
@@ -56,6 +46,7 @@ add_executable(amr2vdb
     src/special.h src/special.cpp
     src/points.h src/points.cpp
     src/export.h src/export.cpp
+    src/pltfilereader.h src/pltfilereader.cpp
 )
 
 set(BUILD_SHARED_LIBS OFF)
@@ -84,7 +75,7 @@ target_include_directories(amr2vdb PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_par
 # Link Deps ====================================================================
 
 find_package(AMReX REQUIRED)
-find_package(PelePhysics REQUIRED)
+#find_package(PelePhysics REQUIRED)
 
 list(PREPEND CMAKE_MODULE_PATH "${THIRD_PARTY_DIR}/lib/cmake/OpenVDB/")
 list(PREPEND CMAKE_MODULE_PATH "${THIRD_PARTY_DIR}/lib64/cmake/OpenVDB/")
@@ -98,21 +89,45 @@ find_library(z_lib NAMES z.a z ${THIRD_PARTY_DIR}/lib)
 find_library(blosc_lib blosc ${THIRD_PARTY_DIR}/lib)
 find_library(openvdb_lib openvdb ${THIRD_PARTY_DIR}/lib)
 find_library(boost_io boost_iostreams ${THIRD_PARTY_DIR}/lib)
+find_library(hdf5_cpp hdf5_cpp PATHS ${THIRD_PARTY_DIR}/lib NO_DEFAULT_PATH REQUIRED)
 
 find_package(spdlog)
 
 target_link_libraries(amr2vdb PRIVATE
     AMReX::amrex_3d
-    PelePhysics::PelePhysics-drm19-Fuego-Simple
     TBB::tbb ${openvdb_lib} ${boost_io}
-    ${blosc_lib} spdlog::spdlog ${zstd_lib} ${z_lib}
+    ${blosc_lib} spdlog::spdlog ${zstd_lib} ${z_lib} ${hdf5_cpp}
 )
 
-message(    AMReX::amrex_3d
-    PelePhysics::PelePhysics-drm19-Fuego-Simple
-    TBB::tbb ${openvdb_lib} ${boost_io}
-    ${blosc_lib} spdlog::spdlog ${zstd_lib} ${z_lib})
-
-# IDE Helpers ==================================================================
+MESSAGE( ${hdf5_cpp})
 
 # Install ======================================================================
+
+include(GNUInstallDirs)
+
+set(THIRD_PARTY_LIB_DIR "${THIRD_PARTY_DIR}/lib")
+set(THIRD_PARTY_PLUGIN_DIR "${THIRD_PARTY_DIR}/plugin")
+
+file(GLOB_RECURSE THIRD_PARTY_LIBS
+    "${THIRD_PARTY_LIB_DIR}/*.so"
+    "${THIRD_PARTY_LIB_DIR}/*.dylib"
+)
+
+file(GLOB_RECURSE THIRD_PARTY_PLUGINS
+    "${THIRD_PARTY_PLUGIN_DIR}/*.so"
+    "${THIRD_PARTY_PLUGIN_DIR}/*.dylib"
+)
+
+install(FILES ${THIRD_PARTY_LIBS} ${THIRD_PARTY_PLUGINS}
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+set_target_properties(amr2vdb PROPERTIES
+    INSTALL_RPATH "\$ORIGIN"
+    BUILD_WITH_INSTALL_RPATH TRUE
+)
+
+# Install the binary
+install(TARGETS amr2vdb
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)

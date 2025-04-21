@@ -1,14 +1,12 @@
 #pragma once
 
-#include <PltFileManager.H>
+#include <AMReX.H>
 
 #include <openvdb/openvdb.h>
 #include <openvdb/tools/Composite.h>
 #include <openvdb/tools/GridTransformer.h>
 #include <openvdb/tools/MultiResGrid.h>
 
-#include <filesystem>
-#include <memory>
 #include <optional>
 
 using FloatMultiGrid    = openvdb::tools::MultiResGrid<openvdb::FloatTree>;
@@ -38,30 +36,6 @@ struct AMRState {
     AMRState const& operator=(AMRState&&)      = delete;
 
     ~AMRState() { amrex::Finalize(amr); }
-};
-
-/// This class is an extension of PltFileManager, providing access to useful
-/// members that are not exposed by default.
-struct LocalPlotFile : public pele::physics::pltfilemanager::PltFileManager {
-public:
-    LocalPlotFile(std::filesystem::path path)
-        : pele::physics::pltfilemanager::PltFileManager(path) { }
-
-    ~LocalPlotFile() = default;
-
-    LocalPlotFile(LocalPlotFile const&)                  = delete;
-    LocalPlotFile const& operator=(LocalPlotFile const&) = delete;
-    LocalPlotFile(LocalPlotFile&&)                       = delete;
-    LocalPlotFile const& operator=(LocalPlotFile&&)      = delete;
-
-    /// Obtain the list of multifabs, to be indexed by refinement level
-    auto const& all_data() const { return m_data; }
-
-    /// Obtain the multifab at a refinement level
-    auto const& get_data(int nlvl) { return m_data.at(nlvl); }
-
-    /// Obtain the distribution mapping at a given refinement level
-    auto const& get_dmap(int nlvl) { return m_dmaps.at(nlvl); }
 };
 
 /// Configuration for a volume extraction

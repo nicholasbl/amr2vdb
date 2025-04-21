@@ -3,6 +3,7 @@
 #include "amr_common.h"
 #include "argparse.h"
 #include "lzs3d.h"
+#include "pltfilereader.h"
 #include "postprocess.h"
 #include "tricubic.h"
 
@@ -12,8 +13,6 @@
 #include <AMReX_FArrayBox.H>
 #include <AMReX_ParmParse.H>
 #include <AMReX_Print.H>
-
-#include <PltFileManager.H>
 
 #include <openvdb/openvdb.h>
 #include <openvdb/tools/Composite.h>
@@ -119,7 +118,7 @@ static void loop_box_constant(amrex::Box const&             bx,
 struct ConversionState {
     VolumeConfig  config;
 
-    std::unique_ptr<LocalPlotFile> plt_data;
+    std::unique_ptr<PltFileReader> plt_data;
 
     /// Requested variable names
     std::vector<std::string> var_names;
@@ -139,7 +138,7 @@ struct ConversionState {
             return false;
         }
 
-        plt_data      = std::make_unique<LocalPlotFile>(path);
+        plt_data      = std::make_unique<PltFileReader>(path);
         auto plt_vars = plt_data->getVariableList();
 
         // Figure out which vars were asked for, and where they are in the plt
