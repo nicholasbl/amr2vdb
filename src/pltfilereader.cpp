@@ -4,6 +4,7 @@
 #include <AMReX_PlotFileUtil.H>
 #include <AMReX_VisMF.H>
 
+#include <filesystem>
 #include <spdlog/spdlog.h>
 #include <utility>
 

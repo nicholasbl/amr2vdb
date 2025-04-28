@@ -208,7 +208,7 @@ struct ConversionState {
         // We can now iterate the AMR at this level
         auto iter = amrex::MFIter(mf);
 
-        spdlog::debug("Iterating blocks...");
+        spdlog::debug("Iterating blocks for {}", current_level);
 
         auto level_bb = config.bounding_box.value_or(openvdb::CoordBBox::inf());
 
@@ -680,6 +680,7 @@ int amr_to_volume(Arguments const& c) {
 
     {
         for (auto const& [k, v] : completed) {
+            // v->setGridClass(openvdb::v12_0::GRID_FOG_VOLUME);
             to_save.push_back(v);
         }
     }
