@@ -203,7 +203,7 @@ void PltFileReader::read_as_hdf5() {
             filespace.selectHyperslab(H5S_SELECT_SET, count, start);
 
             // Memory space to hold the box's data
-            H5::DataSpace memspace(2, dims);
+            H5::DataSpace memspace(2, count);
 
             // Choose type based on precision
             H5::PredType dtype = (sizeof(amrex::Real) == 8)
