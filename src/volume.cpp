@@ -78,12 +78,13 @@ static void loop_box(amrex::Box const&                       bx,
                 for (int offset = 0; offset < var_indices.size(); offset++) {
                     auto index = var_indices[offset];
 
-                    auto value = *a.ptr(i, j, k, index);
+                    float value = *a.ptr(i, j, k, index);
 
-                    accessors[offset].setValue({ i, j, k },
-                                               static_cast<float>(value));
+                    accessors[offset].setValue({ i, j, k }, value);
 
-                    assert(accessors[offset].getValue({ i, j, k }) == value);
+                    assert(std::abs(accessors[offset].getValue({ i, j, k }) -
+                                    value) < 1e-6f);
+                    assert(std::isfinite(value));
                 }
             }
         }
