@@ -194,16 +194,35 @@ void PltFileReader::read_as_hdf5() {
             //          hsize_t offset = ...; // your running flat-data offset
             //          (in cells)
 
-            hsize_t dims[2]  = { static_cast<hsize_t>(npts),
-                                 static_cast<hsize_t>(ncomp) };
-            hsize_t start[2] = { offset, 0 };
-            hsize_t count[2] = { dims[0], dims[1] };
+            hsize_t start[2]  = { offset, 0 };
+            hsize_t stride[2] = { 1, 1 };
+            hsize_t count[2]  = { static_cast<hsize_t>(npts), 1 };
+            hsize_t block[2]  = { 1, static_cast<hsize_t>(ncomp) };
 
             H5::DataSpace filespace = data_ds.getSpace();
-            filespace.selectHyperslab(H5S_SELECT_SET, count, start);
+            filespace.selectHyperslab(
+                H5S_SELECT_SET, count, start, stride, block);
 
-            // Memory space to hold the box's data
+            // Define matching memory space
             H5::DataSpace memspace(2, count);
+
+            spdlog::info("Reading FAB with npts = {}, ncomp = {}, offset = {}",
+                         npts,
+                         ncomp,
+                         offset);
+            spdlog::info("File dataspace dims: {} x {}",
+                         filespace.getSimpleExtentNpoints(),
+                         ncomp);
+            spdlog::info("Memory dataspace points: {}",
+                         memspace.getSelectNpoints());
+            spdlog::info("File selection points: {}",
+                         filespace.getSelectNpoints());
+
+            assert(memspace.getSelectNpoints() == filespace.getSelectNpoints());
+
+
+            assert(memspace.getSelectNpoints() == filespace.getSelectNpoints());
+
 
             // Choose type based on precision
             H5::PredType dtype = (sizeof(amrex::Real) == 8)
