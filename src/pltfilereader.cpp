@@ -182,6 +182,11 @@ void PltFileReader::read_as_hdf5() {
         for (amrex::MFIter mfi(m_data[lev]); mfi.isValid(); ++mfi) {
             auto&     fab  = m_data[lev][mfi];
             const int npts = fab.box().numPts();
+
+            for (int i = 0; i < std::min<int>(flat_data.size(), 10); ++i) {
+                spdlog::info("flat_data[{}] = {}", i, flat_data[i]);
+            }
+
             std::memcpy(fab.dataPtr(),
                         &flat_data[offset],
                         npts * m_nvars * sizeof(amrex::Real));

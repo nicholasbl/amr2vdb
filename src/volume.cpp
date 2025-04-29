@@ -24,6 +24,10 @@
 #include <array>
 #include <span>
 
+// IMPROVEMENTS:
+// Extract levels in parallel. We are almost idle on IO.
+
+
 /// Type of sampling to use during interpolation
 enum class SampleType {
     QUAD,
