@@ -78,9 +78,10 @@ static void loop_box(amrex::Box const&                       bx,
                 for (int offset = 0; offset < var_indices.size(); offset++) {
                     auto index = var_indices[offset];
 
-                    float value = *a.ptr(i, j, k, index);
+                    auto value = *a.ptr(i, j, k, index);
 
-                    accessors[offset].setValue({ i, j, k }, value);
+                    accessors[offset].setValue({ i, j, k },
+                                               static_cast<float>(value));
 
                     assert(accessors[offset].getValue({ i, j, k }) == value);
                 }
@@ -215,10 +216,9 @@ struct ConversionState {
         // only do this if there is a bounding box. 'inf' uses real values that
         // will overflow.
         if (current_level > 0 and config.bounding_box.has_value()) {
-            openvdb::Vec3I l0 =
-                level_bb.min().asVec3I() * std::pow(2, current_level);
-            openvdb::Vec3I l1 =
-                level_bb.max().asVec3I() * std::pow(2, current_level);
+            openvdb::Vec3I l0 = level_bb.min().asVec3I() * (1 << current_level);
+            openvdb::Vec3I l1 = level_bb.max().asVec3I() * (1 << current_level);
+
 
             level_bb =
                 openvdb::CoordBBox(openvdb::Coord(l0), openvdb::Coord(l1));
@@ -239,6 +239,8 @@ struct ConversionState {
             amrex::FArrayBox const& fab = mf[iter];
 
             auto const& a = fab.array();
+
+            AMREX_ALWAYS_ASSERT(fab.box().contains(box));
 
             loop_box(box, a, per_var_accessor, var_ids, level_bb);
         }
