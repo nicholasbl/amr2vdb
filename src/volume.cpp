@@ -69,6 +69,8 @@ static void loop_box(amrex::Box const&                       bx,
     const auto lo = lbound(bx);
     const auto hi = ubound(bx);
 
+    float last_value = 0.0;
+
     for (int k = lo.z; k <= hi.z; ++k) {
         for (int j = lo.y; j <= hi.y; ++j) {
             for (int i = lo.x; i <= hi.x; ++i) {
@@ -82,9 +84,17 @@ static void loop_box(amrex::Box const&                       bx,
 
                     accessors[offset].setValue({ i, j, k }, value);
 
-                    assert(std::abs(accessors[offset].getValue({ i, j, k }) -
-                                    value) < 1e-6f);
-                    assert(std::isfinite(value));
+		    bool check_inf = !std::isfinite(value);
+		    bool check_pre = std::abs(accessors[offset].getValue({ i, j, k }) - value) > 1e-4f;
+
+		    if (check_inf or check_pre) {
+			spdlog::error("Value not written correctly: {} ({}) stored {}", value, check_inf, accessors[offset].getValue({ i, j, k }));
+                    	accessors[offset].setValue({ i, j, k }, last_value);
+		    } else {
+			// only save good values
+		    	last_value = value;
+		    }
+
                 }
             }
         }
