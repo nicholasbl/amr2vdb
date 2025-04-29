@@ -187,9 +187,32 @@ void PltFileReader::read_as_hdf5() {
                 spdlog::info("flat_data[{}] = {}", i, flat_data[i]);
             }
 
-            std::memcpy(fab.dataPtr(),
-                        &flat_data[offset],
-                        npts * m_nvars * sizeof(amrex::Real));
+            // Assume: H5::DataSet data_ds; already opened
+            //          amrex::Real* dest = fab.dataPtr();
+            //          int npts = fab.box().numPts();
+            //          int ncomp = m_nvars;
+            //          hsize_t offset = ...; // your running flat-data offset
+            //          (in cells)
+
+            hsize_t dims[2]  = { static_cast<hsize_t>(npts),
+                                 static_cast<hsize_t>(ncomp) };
+            hsize_t start[2] = { offset, 0 };
+            hsize_t count[2] = { dims[0], dims[1] };
+
+            H5::DataSpace filespace = data_ds.getSpace();
+            filespace.selectHyperslab(H5S_SELECT_SET, count, start);
+
+            // Memory space to hold the box's data
+            H5::DataSpace memspace(2, dims);
+
+            // Choose type based on precision
+            H5::PredType dtype = (sizeof(amrex::Real) == 8)
+                                     ? H5::PredType::NATIVE_DOUBLE
+                                     : H5::PredType::NATIVE_FLOAT;
+
+            data_ds.read(fab.dataPtr(), dtype, memspace, filespace);
+
+
             offset += npts * m_nvars;
         }
     }
