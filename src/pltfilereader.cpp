@@ -54,6 +54,7 @@ struct BoxEntry3D {
 
 
 void PltFileReader::read_as_hdf5() {
+    spdlog::info("Reading HDF5 format");
     using namespace H5;
 
     H5File file(m_pltFile, H5F_ACC_RDONLY);
@@ -248,6 +249,7 @@ PltFileReader::PltFileReader(std::string a_pltFile)
         read_as_hdf5();
         return;
     }
+    spdlog::info("Reading native directory format");
 
     // Get the plt metadata and resize part of the data vectors
     const std::string pltFileHeader(m_pltFile + "/Header");
