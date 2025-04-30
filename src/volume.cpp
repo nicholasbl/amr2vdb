@@ -91,14 +91,15 @@ static void loop_box(amrex::Box const&                       bx,
 		    bool check_inf = !std::isfinite(value);
 		    bool check_pre = std::abs(accessors[offset].getValue({ i, j, k }) - value) > 1e-4f;
 
-		    if (check_inf or check_pre) {
-			spdlog::error("Value not written correctly: {} ({}) stored {}", value, check_inf, accessors[offset].getValue({ i, j, k }));
-                    	accessors[offset].setValue({ i, j, k }, last_value);
-		    } else {
-			// only save good values
-		    	last_value = value;
-		    }
+                    // spdlog::debug("Values: {}", value);
 
+                    if (check_inf or check_pre) {
+                        spdlog::error("Value not written correctly: {} ({}) stored {}", value, check_inf, accessors[offset].getValue({ i, j, k }));
+                    	accessors[offset].setValue({ i, j, k }, last_value);
+                    } else {
+                        // only save good values
+		    	last_value = value;
+                    }
                 }
             }
         }

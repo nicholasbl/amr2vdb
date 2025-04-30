@@ -183,56 +183,55 @@ void PltFileReader::read_as_hdf5() {
             auto&     fab  = m_data[lev][mfi];
             const int npts = fab.box().numPts();
 
-            for (int i = 0; i < std::min<int>(flat_data.size(), 10); ++i) {
-                spdlog::info("flat_data[{}] = {}", i, flat_data[i]);
+            // testing hyperslab
+            // this writes zeros and thus needs more work
+            if (false) {
+                hsize_t start[2]  = { offset, 0 };
+                hsize_t stride[2] = { 1, 1 };
+                hsize_t count[2]  = { static_cast<hsize_t>(npts), 1 };
+                hsize_t block[2]  = { 1, static_cast<hsize_t>(ncomp) };
+
+                H5::DataSpace filespace = data_ds.getSpace();
+                filespace.selectHyperslab(
+                    H5S_SELECT_SET, count, start, stride, block);
+
+                // Define matching memory space
+                H5::DataSpace memspace(2, count);
+
+                spdlog::info(
+                    "Reading FAB with npts = {}, ncomp = {}, offset = {}",
+                    npts,
+                    ncomp,
+                    offset);
+                spdlog::info("File dataspace dims: {} x {}",
+                             filespace.getSimpleExtentNpoints(),
+                             ncomp);
+                spdlog::info("Memory dataspace points: {}",
+                             memspace.getSelectNpoints());
+                spdlog::info("File selection points: {}",
+                             filespace.getSelectNpoints());
+
+                assert(memspace.getSelectNpoints() ==
+                       filespace.getSelectNpoints());
+
+
+                assert(memspace.getSelectNpoints() ==
+                       filespace.getSelectNpoints());
+
+
+                // Choose type based on precision
+                H5::PredType dtype = (sizeof(amrex::Real) == 8)
+                                         ? H5::PredType::NATIVE_DOUBLE
+                                         : H5::PredType::NATIVE_FLOAT;
+
+                data_ds.read(fab.dataPtr(), dtype, memspace, filespace);
+            } else {
+                // This works, but is very brittle
+                std::memcpy(fab.dataPtr(),
+                            &flat_data[offset],
+                            npts * m_nvars * sizeof(amrex::Real));
+                offset += npts * m_nvars;
             }
-
-            // Assume: H5::DataSet data_ds; already opened
-            //          amrex::Real* dest = fab.dataPtr();
-            //          int npts = fab.box().numPts();
-            //          int ncomp = m_nvars;
-            //          hsize_t offset = ...; // your running flat-data offset
-            //          (in cells)
-
-            hsize_t start[2]  = { offset, 0 };
-            hsize_t stride[2] = { 1, 1 };
-            hsize_t count[2]  = { static_cast<hsize_t>(npts), 1 };
-            hsize_t block[2]  = { 1, static_cast<hsize_t>(ncomp) };
-
-            H5::DataSpace filespace = data_ds.getSpace();
-            filespace.selectHyperslab(
-                H5S_SELECT_SET, count, start, stride, block);
-
-            // Define matching memory space
-            H5::DataSpace memspace(2, count);
-
-            spdlog::info("Reading FAB with npts = {}, ncomp = {}, offset = {}",
-                         npts,
-                         ncomp,
-                         offset);
-            spdlog::info("File dataspace dims: {} x {}",
-                         filespace.getSimpleExtentNpoints(),
-                         ncomp);
-            spdlog::info("Memory dataspace points: {}",
-                         memspace.getSelectNpoints());
-            spdlog::info("File selection points: {}",
-                         filespace.getSelectNpoints());
-
-            assert(memspace.getSelectNpoints() == filespace.getSelectNpoints());
-
-
-            assert(memspace.getSelectNpoints() == filespace.getSelectNpoints());
-
-
-            // Choose type based on precision
-            H5::PredType dtype = (sizeof(amrex::Real) == 8)
-                                     ? H5::PredType::NATIVE_DOUBLE
-                                     : H5::PredType::NATIVE_FLOAT;
-
-            data_ds.read(fab.dataPtr(), dtype, memspace, filespace);
-
-
-            offset += npts * m_nvars;
         }
     }
 
