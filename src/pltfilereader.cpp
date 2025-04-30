@@ -242,6 +242,13 @@ void PltFileReader::read_as_hdf5() {
 PltFileReader::PltFileReader(std::string a_pltFile)
     : m_pltFile { std::move(a_pltFile) } {
 
+    a_pltFile = std::filesystem::canonical(a_pltFile);
+
+    if (!std::filesystem::exists(a_pltFile)) {
+        spdlog::error("Input {} does not exist", a_pltFile);
+        exit(1);
+    }
+
     // this breaks
     // if (!hdf5::file::is_hdf5_file(a_pltFile)) {
     if (!std::filesystem::is_directory(a_pltFile)) {
