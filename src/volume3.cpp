@@ -553,10 +553,17 @@ int amr_to_volume_sets(Arguments const& c) {
                 auto this_grid = multi->grid(level_i);
                 auto name = sampled_grid.name + "_" + std::to_string(level_i);
 
-                spdlog::info("Creating grid {}", name);
+                spdlog::info("Creating grid {} with {} {}",
+                             name,
+                             this_grid->activeVoxelCount(),
+                             this_grid->evalActiveVoxelBoundingBox());
 
                 if (level_i != 0) {
                     this_grid = mask_grid(multi->grid(level_i - 1), this_grid);
+
+                    spdlog::info("Masked {} to {}",
+                                 this_grid->evalActiveVoxelBoundingBox(),
+                                 this_grid->activeVoxelCount());
                 }
 
                 this_grid->setName(name);
