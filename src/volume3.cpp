@@ -546,13 +546,17 @@ int amr_to_volume_sets(Arguments const& c) {
                 exit(1);
             }
 
+            // remember that levels are inverted. the higher you go, the coarser
+            // we want to mask coarser with finer
+
             for (auto level_i = 0; level_i < max_levels; level_i++) {
                 auto this_grid = multi->grid(level_i);
-                auto name =
-                    this_grid->getName() + "_" + std::to_string(level_i);
+                auto name = sampled_grid.name + "_" + std::to_string(level_i);
 
-                if (level_i + 1 < max_levels - 1) {
-                    this_grid = mask_grid(multi->grid(level_i + 1), this_grid);
+                spdlog::info("Creating grid {}", name);
+
+                if (level_i != 0) {
+                    this_grid = mask_grid(multi->grid(level_i - 1), this_grid);
                 }
 
                 this_grid->setName(name);
