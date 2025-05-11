@@ -669,4 +669,12 @@ void postprocess(toml::value const& root, GridMap& l) {
 
         add_in_mag_grad_density(mgd, l);
     }
+
+    if (node.contains("save_as_half")) {
+        auto half_node = toml::find(node, "save_as_half");
+
+        for (auto& [k, v] : l) {
+            v->setSaveFloatAsHalf(true);
+        }
+    }
 }

@@ -47,6 +47,7 @@ add_executable(amr2vdb
     src/points.h src/points.cpp
     src/export.h src/export.cpp
     src/pltfilereader.h src/pltfilereader.cpp
+    src/volume3.h src/volume3.cpp
 )
 
 set(BUILD_SHARED_LIBS OFF)

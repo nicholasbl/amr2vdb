@@ -15,9 +15,11 @@
 #include <AMReX_Print.H>
 
 #include <openvdb/openvdb.h>
+#include <openvdb/tools/Clip.h>
 #include <openvdb/tools/Composite.h>
 #include <openvdb/tools/Filter.h>
 #include <openvdb/tools/GridTransformer.h>
+#include <openvdb/tools/Mask.h>
 #include <openvdb/tools/MultiResGrid.h>
 
 
@@ -26,23 +28,6 @@
 
 // IMPROVEMENTS:
 // Extract levels in parallel. We are almost idle on IO.
-
-
-/// Type of sampling to use during interpolation
-enum class SampleType {
-    QUAD,
-    LANC,
-    TRIC,
-};
-
-const char* to_string(SampleType type) {
-    switch (type) {
-    case SampleType::QUAD: return "Triquadratic";
-    case SampleType::LANC: return "Lanczos";
-    case SampleType::TRIC: return "Tricubic";
-    }
-    __builtin_unreachable();
-}
 
 /// Intermediate multiresolution grid, ready for interpolation
 struct SampledGrid {
@@ -88,8 +73,10 @@ static void loop_box(amrex::Box const&                       bx,
 
                     accessors[offset].setValue({ i, j, k }, value);
 
-		    bool check_inf = !std::isfinite(value);
-		    bool check_pre = std::abs(accessors[offset].getValue({ i, j, k }) - value) > 1e-4f;
+                    bool check_inf = !std::isfinite(value);
+                    bool check_pre =
+                        std::abs(accessors[offset].getValue({ i, j, k }) -
+                                 value) > 1e-4f;
 
                     // spdlog::debug("Values: {}", value);
 
@@ -137,14 +124,14 @@ static void loop_box_constant(amrex::Box const&             bx,
 /// The ConversionState class models the settings and state for a conversion
 ///
 struct ConversionState {
-    VolumeConfig  config;
+    VolumeConfig config;
 
     std::unique_ptr<PltFileReader> plt_data;
 
     /// Requested variable names
     std::vector<std::string> var_names;
     /// Corresponding variable ids in the AMR
-    std::vector<int>         var_ids;
+    std::vector<int> var_ids;
 
     ConversionState(VolumeConfig c) : config(c) { }
 
@@ -500,116 +487,17 @@ static std::vector<FloatGridPtr> make_grids(int level) {
     return ret;
 }
 
+static FloatGridPtr mask_grid(FloatGridPtr mask_grid, FloatGridPtr to_mask) {
+    openvdb::BoolGrid::Ptr grid = openvdb::tools::interiorMask(*mask_grid);
 
-/// Take an AMR styled VDB multi_grid and resample into a single uniform
-/// multi_grid.
-///
-/// This requires care. AMR only has the blocks that matter at a refinement
-/// level. VDB expects their multires data to be like a mipmap, where all the
-/// coarse levels are mirrors (at lower res) of the finest level. So to make a
-/// uniform multi_grid with the tools VDB has, we go level by level,
-/// interpolating coarser information first, then copying over the AMR data at
-/// that level.
-///
-/// This function can also do some smoothing; coarse data can get pretty blocky,
-/// so we can optionally smooth levels or at the end. Smoothing does change the
-/// domain, so a clip box is provided to restrict the output VDB
-///
-/// \param source Multires multi_grid to pack into a uniform multi_grid
-/// \param box Box to clip the data to
-/// \param type Interpolation sampling type
-/// \param opts Options for smoothing/blurring
-/// \return A uniform multi_grid at the finest resolution of the input
-///
-FloatGridPtr resample(SampledGrid    source,
-                      openvdb::BBoxd box,
-                      SampleType     type,
-                      BlurArgs       opts) {
-    spdlog::info("Resampling {} to fine grid", source.name);
-
-    // interpolate from coarse to fine to this multi_grid
-    int max_levels = source.multi_grid->numLevels();
-    int level      = max_levels;
-
-    // create new grid
-    auto new_multi_grid = make_grids(max_levels);
-
-    while (level-- > 0) {
-        spdlog::info("Packing {}", level);
-
-        auto in_grid  = source.multi_grid->grid(level);
-        auto out_grid = new_multi_grid.at(level);
-
-        spdlog::debug("In {}", in_grid->activeVoxelCount());
-
-        // We first check if there is a coarser grid, and if so, interpolate
-        // that into this grid. This a bit like a painter's algorithm approach;
-        // interpolate first, then copy in data for this level
-
-        if (level != max_levels - 1) {
-            // Take from a coarser grid, and interpolate into this grid
-            auto previous_grid = new_multi_grid.at(level + 1);
-
-            spdlog::debug("Interpolate {} to {}", (level + 1), level);
-
-            spdlog::debug("Previous has {}", previous_grid->activeVoxelCount());
-
-            switch (type) {
-            case SampleType::QUAD:
-                openvdb::tools::resampleToMatch<
-                    openvdb::tools::QuadraticSampler>(*previous_grid,
-                                                      *out_grid);
-                break;
-            case SampleType::LANC:
-                openvdb::tools::resampleToMatch<LZS3D>(*previous_grid,
-                                                       *out_grid);
-                break;
-            case SampleType::TRIC:
-                openvdb::tools::resampleToMatch<Tricubic>(*previous_grid,
-                                                          *out_grid);
-                break;
-            }
-
-            spdlog::debug("Out prepared with {}", out_grid->activeVoxelCount());
-        }
-
-
-        // copy over new data
-        openvdb::tools::compReplace(*out_grid, *source.multi_grid->grid(level));
-
-        spdlog::debug("Storing to level {}", level);
-        spdlog::debug("Out resampled with {}", out_grid->activeVoxelCount());
-
-
-        if (level != 0 and opts.strategy == BlurArgs::BLUR_AFTER_EVERY_LEVEL) {
-
-            opts.blur_fld(out_grid);
-        } else if (level == 1 and
-                   opts.strategy == BlurArgs::BLUR_AFTER_LAST_LEVEL) {
-            opts.blur_fld(out_grid);
-        }
-    }
-
-    auto ret_grid = new_multi_grid.at(0);
-
-    if (opts.strategy == BlurArgs::BLUR_AT_END) { opts.blur_fld(ret_grid); }
-
-    spdlog::debug("Final ", ret_grid->activeVoxelCount());
-
-    ret_grid->clipGrid(box);
-    ret_grid->setName(source.name);
-    ret_grid->setGridClass(openvdb::GridClass::GRID_FOG_VOLUME);
-
-    openvdb::tools::prune(ret_grid->tree());
-
-    return ret_grid;
+    return openvdb::tools::clip(*to_mask, *grid);
 }
 
-int amr_to_volume(Arguments const& c) {
+int amr_to_volume_sets(Arguments const& c) {
     std::string source_plt = toml::find<std::string>(c.root, "input");
     std::string dest_vdb   = toml::find<std::string>(c.root, "output");
 
-    auto amr_config_node = toml::find(c.root, "amr");
+    auto amr_config_node = toml::find(c.root, "amr3");
 
     VolumeConfig config;
 
@@ -642,57 +530,42 @@ int amr_to_volume(Arguments const& c) {
 
     auto loaded_amr_grids = load_file(source_plt, config);
 
-    auto sample_type =
-        toml::find_or<std::string>(amr_config_node, "sample", "triquad");
-
-    SampleType type = [&] {
-        if (sample_type == "lanczos") return SampleType::LANC;
-        if (sample_type == "tricubic") return SampleType::TRIC;
-        return SampleType::QUAD;
-    }();
-
-    spdlog::info("Using sample method {}", to_string(type));
-
-    auto blur_config_node =
-        toml::find_or(amr_config_node, "blur", toml::value());
-
-    BlurArgs opts = BlurArgs::from_toml(blur_config_node);
-
     GridMap completed;
 
-    for (auto& multires : loaded_amr_grids.grids) {
+    for (auto& sampled_grid : loaded_amr_grids.grids) {
         // check if there is a per-variable override
 
-        if (multires.multi_grid) {
+        if (sampled_grid.multi_grid) {
 
-            BlurArgs local_blur_args = opts;
+            auto multi = sampled_grid.multi_grid;
 
-            if (amr_config_node.contains(multires.name)) {
-                spdlog::info("Using custom options for variable {}",
-                             multires.name);
+            auto max_levels = multi->numLevels();
 
-                auto local_config = toml::find(amr_config_node, multires.name);
-
-                auto local_blur_config =
-                    toml::find_or(local_config, "blur", toml::value());
-
-                if (local_blur_config.is_table()) {
-                    auto base = blur_config_node;
-                    merge_values(base, local_blur_config);
-
-                    local_blur_args = BlurArgs::from_toml(base);
-                }
+            if (max_levels < 1) {
+                spdlog::error("Unable to handle zero sized levels!");
+                exit(1);
             }
 
-            auto new_grid = resample(
-                multires, loaded_amr_grids.bbox, type, local_blur_args);
-            multires.multi_grid.reset(); // try to minimize mem usage
-            completed[new_grid->getName()] = new_grid;
+            for (auto level_i = 0; level_i < max_levels; level_i++) {
+                auto this_grid = multi->grid(level_i);
+                auto name =
+                    this_grid->getName() + "_" + std::to_string(level_i);
+
+                if (level_i + 1 < max_levels - 1) {
+                    this_grid = mask_grid(multi->grid(level_i + 1), this_grid);
+                }
+
+                this_grid->setName(name);
+
+                completed[name] = this_grid;
+            }
+
+            sampled_grid.multi_grid.reset(); // try to minimize mem usage
         }
 
-        if (multires.plain_grid) {
-            multires.plain_grid->setName(multires.name);
-            completed[multires.name] = multires.plain_grid;
+        if (sampled_grid.plain_grid) {
+            sampled_grid.plain_grid->setName(sampled_grid.name);
+            completed[sampled_grid.name] = sampled_grid.plain_grid;
         }
     }
 
