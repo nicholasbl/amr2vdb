@@ -272,8 +272,6 @@ struct ConversionState {
         std::vector<SampledGrid> ret_grid;
 
         if (config.max_level > 0) {
-            // we have to do some resampling
-
             // This is a bit silly, but we just make a big list of vdbs that
             // correspond to our list of desired variables
             std::vector<FloatMultiGrid::Ptr> per_var_multivdb_grids;
@@ -488,7 +486,22 @@ static std::vector<FloatGridPtr> make_grids(int level) {
 }
 
 static void mask_grid(FloatGridPtr mask_grid, FloatGridPtr to_mask) {
-    to_mask->topologyDifference(*mask_grid);
+    // make a mask
+
+    auto resampled = openvdb::BoolGrid::create(false);
+    {
+        auto bool_grid = openvdb::BoolGrid::create(false);
+        bool_grid->setTransform(mask_grid->transform().copy());
+        bool_grid->topologyUnion(*mask_grid);
+
+
+        resampled->setTransform(to_mask->transform().copy());
+        openvdb::tools::resampleToMatch<openvdb::tools::QuadraticSampler>(
+            *bool_grid, *resampled);
+    }
+
+
+    to_mask->topologyDifference(*resampled);
 }
 
 int amr_to_volume_sets(Arguments const& c) {
@@ -552,17 +565,32 @@ int amr_to_volume_sets(Arguments const& c) {
                 auto this_grid = multi->grid(level_i);
                 auto name = sampled_grid.name + "_" + std::to_string(level_i);
 
-                spdlog::info("Creating grid {} with {} {}",
+                auto bb = this_grid->evalActiveVoxelBoundingBox();
+
+                spdlog::info("Creating grid {} with {}: {} {} {} - {} {} {}",
                              name,
                              this_grid->activeVoxelCount(),
-                             this_grid->evalActiveVoxelBoundingBox());
+                             bb.min().x(),
+                             bb.min().y(),
+                             bb.min().z(),
+                             bb.max().x(),
+                             bb.max().y(),
+                             bb.max().z());
 
                 if (level_i != 0) {
                     mask_grid(multi->grid(level_i - 1), this_grid);
 
-                    spdlog::info("Masked {} to {}",
+                    auto bb = this_grid->evalActiveVoxelBoundingBox();
+
+                    spdlog::info("Masked {} to: {} {} {} - {} {} {}",
                                  this_grid->evalActiveVoxelBoundingBox(),
-                                 this_grid->activeVoxelCount());
+                                 this_grid->activeVoxelCount(),
+                                 bb.min().x(),
+                                 bb.min().y(),
+                                 bb.min().z(),
+                                 bb.max().x(),
+                                 bb.max().y(),
+                                 bb.max().z());
                 }
 
                 this_grid->setName(name);
