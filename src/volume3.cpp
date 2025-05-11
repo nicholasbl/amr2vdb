@@ -487,10 +487,8 @@ static std::vector<FloatGridPtr> make_grids(int level) {
     return ret;
 }
 
-static FloatGridPtr mask_grid(FloatGridPtr mask_grid, FloatGridPtr to_mask) {
-    openvdb::BoolGrid::Ptr grid = openvdb::tools::interiorMask(*mask_grid);
-
-    return openvdb::tools::clip(*to_mask, *grid);
+static void mask_grid(FloatGridPtr mask_grid, FloatGridPtr to_mask) {
+    to_mask->topologyDifference(*mask_grid);
 }
 
 int amr_to_volume_sets(Arguments const& c) {
@@ -548,8 +546,9 @@ int amr_to_volume_sets(Arguments const& c) {
 
             // remember that levels are inverted. the higher you go, the coarser
             // we want to mask coarser with finer
+            // now this means we want to process things in a certain order.
 
-            for (auto level_i = 0; level_i < max_levels; level_i++) {
+            for (int level_i = max_levels - 1; level_i >= 0; --level_i) {
                 auto this_grid = multi->grid(level_i);
                 auto name = sampled_grid.name + "_" + std::to_string(level_i);
 
@@ -559,7 +558,7 @@ int amr_to_volume_sets(Arguments const& c) {
                              this_grid->evalActiveVoxelBoundingBox());
 
                 if (level_i != 0) {
-                    this_grid = mask_grid(multi->grid(level_i - 1), this_grid);
+                    mask_grid(multi->grid(level_i - 1), this_grid);
 
                     spdlog::info("Masked {} to {}",
                                  this_grid->evalActiveVoxelBoundingBox(),
