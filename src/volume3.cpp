@@ -557,11 +557,10 @@ int amr_to_volume_sets(Arguments const& c) {
     GridMap completed;
 
     for (auto& sampled_grid : loaded_amr_grids.grids) {
-        // check if there is a per-variable override
 
         if (!sampled_grid.multi_grid) {
-            spdlog::error("No grids!");
-            return EXIT_FAILURE;
+            spdlog::error("No grids for {}", sampled_grid.name);
+            continue;
         }
 
         auto multi = sampled_grid.multi_grid;
@@ -599,6 +598,7 @@ int amr_to_volume_sets(Arguments const& c) {
                 auto bb = this_grid->evalActiveVoxelBoundingBox();
 
                 spdlog::info("Masked {} to: {} {} {} - {} {} {}",
+                             name,
                              this_grid->evalActiveVoxelBoundingBox(),
                              this_grid->activeVoxelCount(),
                              bb.min().x(),
@@ -613,8 +613,6 @@ int amr_to_volume_sets(Arguments const& c) {
 
             completed[name] = this_grid;
         }
-
-        sampled_grid.multi_grid.reset(); // try to minimize mem usage
     }
 
     if (c.root.contains("post")) { postprocess(c.root, completed); }
