@@ -29,11 +29,10 @@
 // IMPROVEMENTS:
 // Extract levels in parallel. We are almost idle on IO.
 
-/// Intermediate multiresolution grid, ready for interpolation
+/// This is a single quantity
 struct SampledGrid {
     std::string       name;
     FloatMultiGridPtr multi_grid = nullptr;
-    FloatGridPtr      plain_grid = nullptr;
 };
 
 /// Extraction result
@@ -269,66 +268,46 @@ struct ConversionState {
         spdlog::info("Domain H: {} {} {}", harray[0], harray[1], harray[2]);
         spdlog::info("Var Num:  {}", plt_data->getVariableList().size());
 
-        std::vector<SampledGrid> ret_grid;
 
-        if (config.max_level > 0) {
-            // This is a bit silly, but we just make a big list of vdbs that
-            // correspond to our list of desired variables
-            std::vector<FloatMultiGrid::Ptr> per_var_multivdb_grids;
+        // This is a bit silly, but we just make a big list of vdbs that
+        // correspond to our list of desired variables
+        std::vector<FloatMultiGrid::Ptr> per_var_multivdb_grids;
 
-            for (size_t i = 0; i < var_ids.size(); i++) {
-                auto g = std::make_shared<FloatMultiGrid>(config.max_level + 1,
-                                                          0.0f);
-                per_var_multivdb_grids.push_back(g);
-            }
+        for (size_t i = 0; i < var_ids.size(); i++) {
+            auto g =
+                std::make_shared<FloatMultiGrid>(config.max_level + 1, 0.0f);
+            per_var_multivdb_grids.push_back(g);
+        }
 
 
-            // note the <= here
-            for (int current_level = 0; current_level <= config.max_level;
-                 current_level++) {
-                spdlog::info("Working on AMR level {}", current_level);
-                // also note that VDB does inverse resolution order. 0 is the
-                // finest. so we want to map, say 3 -> 0 and 0 -> 3
-                size_t vdb_mapped_level = (config.max_level - current_level);
-                spdlog::debug("Mapping to VDB level {}", vdb_mapped_level);
-
-                std::vector<FloatGridPtr> local_grids;
-
-                for (auto& g : per_var_multivdb_grids) {
-                    local_grids.push_back(g->grid(vdb_mapped_level));
-                }
-
-                extract_level(current_level, local_grids);
-            }
-
-            spdlog::info("Sampling complete");
-
-            // Transform output a bit to simplify things
-
-            for (int i = 0; i < per_var_multivdb_grids.size(); i++) {
-                ret_grid.emplace_back(SampledGrid {
-                    .name       = var_names[i],
-                    .multi_grid = per_var_multivdb_grids[i],
-                });
-            }
-        } else {
-            // we shall be doing no resampling
+        // note the <= here
+        for (int current_level = 0; current_level <= config.max_level;
+             current_level++) {
+            spdlog::info("Working on AMR level {}", current_level);
+            // also note that VDB does inverse resolution order. 0 is the
+            // finest. so we want to map, say 3 -> 0 and 0 -> 3
+            size_t vdb_mapped_level = (config.max_level - current_level);
+            spdlog::debug("Mapping to VDB level {}", vdb_mapped_level);
 
             std::vector<FloatGridPtr> local_grids;
 
-            for (size_t i = 0; i < var_ids.size(); i++) {
-                auto g = FloatGrid::create(0.0f);
-                local_grids.push_back(g);
+            for (auto& g : per_var_multivdb_grids) {
+                local_grids.push_back(g->grid(vdb_mapped_level));
             }
 
-            extract_level(0, local_grids);
+            extract_level(current_level, local_grids);
+        }
 
-            for (size_t i = 0; i < var_ids.size(); i++) {
-                ret_grid.emplace_back(SampledGrid {
-                    .name       = var_names[i],
-                    .plain_grid = local_grids.at(i),
-                });
-            }
+        spdlog::info("Sampling complete");
+
+        // Transform output a bit to simplify things
+        std::vector<SampledGrid> ret_grid;
+
+        for (int i = 0; i < per_var_multivdb_grids.size(); i++) {
+            ret_grid.emplace_back(SampledGrid {
+                .name       = var_names[i],
+                .multi_grid = per_var_multivdb_grids[i],
+            });
         }
 
         // If the user asked for an AMR structure grid, execute that and add it
@@ -407,104 +386,138 @@ static Result load_file(std::filesystem::path path, VolumeConfig const& c) {
     return c_state.write_to_vdbs();
 }
 
-///
-/// The BlurArgs class holds smoothing/blurring options
-///
-struct BlurArgs {
-    enum Strat {
-        NO_BLUR,                // No blur requested
-        BLUR_AFTER_EVERY_LEVEL, // As we process levels, blur each time
-        BLUR_AFTER_LAST_LEVEL,  // Only blur the last coarsest level
-        BLUR_AT_END,            // Blur the whole thing at the end
-    } strategy = NO_BLUR;
+// static void mask_grid(FloatGridPtr mask_grid, FloatGridPtr to_mask) {
+//     // make a mask
 
-    int blur_radius     = 1;
-    int blur_iterations = 1;
+//     auto resampled = openvdb::BoolGrid::create(false);
+//     {
+//         auto bool_grid = openvdb::BoolGrid::create(false);
+//         bool_grid->setName("mask");
+//         bool_grid->setTransform(mask_grid->transform().copy());
+//         // bool_grid->topologyUnion(*mask_grid);
+//         auto accessor = bool_grid->getAccessor();
+//         for (auto iter = mask_grid->cbeginValueOn(); iter; ++iter) {
+//             accessor.setValueOn(iter.getCoord());
+//         }
 
-    /// Read blur options from a TOML node
-    static BlurArgs from_toml(toml::value const& val) {
-        return BlurArgs {
-            .strategy = BlurArgs::string_to_strat(
-                toml::find_or(val, "strategy", "none")),
-            .blur_radius     = toml::find_or<int>(val, "radius", -1),
-            .blur_iterations = toml::find_or<int>(val, "iterations", 0),
-        };
-    }
+//         openvdb::io::File("mask_before.vdb").write({ bool_grid });
 
-    /// Execute a blur on a given grid
-    void blur_fld(FloatGridPtr ptr) const {
-        if (blur_radius <= 0) return;
 
-        spdlog::info("Blur radius {}x{}", blur_radius, blur_iterations);
+//         resampled->setTransform(to_mask->transform().copy());
+//         openvdb::tools::resampleToMatch<openvdb::tools::PointSampler>(
+//             *bool_grid, *resampled);
 
-        auto filter = openvdb::tools::Filter(*ptr);
+//         resampled->setName("mask");
+//         openvdb::io::File("mask_after.vdb").write({ resampled });
+//     }
 
-        // filter.gaussian(blur_radius, blur_iterations);
-        filter.mean(blur_radius, blur_iterations);
-    }
 
-    /// Turing a string into a strategy
-    static Strat string_to_strat(std::string text) {
-        static std::unordered_map<std::string, Strat> mapper = {
-            { "after_every", BLUR_AFTER_EVERY_LEVEL },
-            { "after_last", BLUR_AFTER_LAST_LEVEL },
-            { "at_end", BLUR_AT_END },
-        };
-
-        for (auto& c : text) {
-            c = std::tolower(c);
-        }
-
-        if (auto iter = mapper.find(text); iter != mapper.end()) {
-            return iter->second;
-        }
-
-        return NO_BLUR;
-    }
-};
-
-/// Make a multiresolution VDB (which is just a list of grids with different
-/// transforms)
-static std::vector<FloatGridPtr> make_grids(int level) {
-    std::vector<FloatGridPtr> ret;
-    assert(level > 0);
-
-    for (int i = 0; i < level; i++) {
-        auto g = FloatGrid::create(0.0);
-
-        auto xform = openvdb::math::Transform::createLinearTransform();
-
-        // each level is a power of two refinement
-        if (level > 0) xform->preScale(1 << i);
-
-        g->setTransform(xform);
-
-        ret.push_back(g);
-    }
-
-    return ret;
-}
+//     to_mask->topologyDifference(*resampled);
+// }
 
 static void mask_grid(FloatGridPtr mask_grid, FloatGridPtr to_mask) {
     // make a mask
+    auto mask = openvdb::FloatGrid::create(1.0f);
+    mask->setTransform(mask_grid->transform().copy());
+    mask->setGridClass(openvdb::GRID_FOG_VOLUME);
 
-    auto resampled = openvdb::BoolGrid::create(false);
     {
-        auto bool_grid = openvdb::BoolGrid::create(false);
-        bool_grid->setTransform(mask_grid->transform().copy());
-        bool_grid->topologyUnion(*mask_grid);
-
-
-        resampled->setTransform(to_mask->transform().copy());
-        openvdb::tools::resampleToMatch<openvdb::tools::QuadraticSampler>(
-            *bool_grid, *resampled);
+        auto accessor = mask->getAccessor();
+        for (auto iter = mask_grid->cbeginValueOn(); iter; ++iter) {
+            accessor.setValue(iter.getCoord(), 0.0f);
+        }
     }
 
+    mask->pruneGrid();
 
-    to_mask->topologyDifference(*resampled);
+    // mask->setName("mask");
+    // openvdb::io::File("mask_before.vdb").write({ mask });
+
+    auto resampled_mask = openvdb::FloatGrid::create(1.0f);
+    resampled_mask->setTransform(to_mask->transform().copy());
+    openvdb::tools::resampleToMatch<openvdb::tools::PointSampler>(
+        *mask, *resampled_mask);
+
+    // resampled_mask->setName("mask");
+    // openvdb::io::File("mask_after.vdb").write({ resampled_mask });
+
+    openvdb::tools::compMul(*to_mask, *resampled_mask);
+
+    to_mask->pruneGrid(0.0);
+}
+
+// Create a sphere SDF as test data
+FloatGridPtr
+createSphere(float radius, openvdb::Vec3f center, float voxelSize) {
+    auto grid      = openvdb::FloatGrid::create(0);
+    auto transform = openvdb::math::Transform::createLinearTransform(voxelSize);
+    grid->setTransform(transform);
+
+    int  dim = static_cast<int>(radius * 2.2f / voxelSize);
+    auto lo  = openvdb::Coord(-dim, -dim, -dim);
+    auto hi  = openvdb::Coord(dim, dim, dim);
+
+    auto accessor = openvdb::FloatGrid::Accessor(grid->tree());
+
+    spdlog::info(
+        "{} {} {} < {} {} {}", lo.x(), lo.y(), lo.z(), hi.x(), hi.y(), hi.z());
+
+    for (int k = lo.z(); k <= hi.z(); ++k) {
+        for (int j = lo.y(); j <= hi.y(); ++j) {
+            for (int i = lo.x(); i <= hi.x(); ++i) {
+                openvdb::Coord ijk(i, j, k);
+                openvdb::Vec3d pos = transform->indexToWorld(ijk);
+
+                double dist = (pos - center).length();
+                if (dist < radius) { accessor.setValue(ijk, 1.0); }
+            }
+        }
+    }
+
+    // grid->pruneGrid();
+
+    grid->setGridClass(openvdb::GRID_FOG_VOLUME);
+    return grid;
 }
 
 int amr_to_volume_sets(Arguments const& c) {
+    spdlog::info("Using volume sets");
+
+#if 0
+    {
+        spdlog::info("Testing...");
+
+        // Create a coarse sphere
+        auto coarseGrid = createSphere(
+            /*radius=*/50.0f,
+            openvdb::Vec3f(0, 0, 0),
+            /*voxelSize=*/1.0f);
+
+        // Create a high-res sphere overlapping partially
+        auto highResGrid = createSphere(
+            /*radius=*/20.0f,
+            openvdb::Vec3f(10, 0, 0),
+            /*voxelSize=*/0.5f);
+
+        // Apply your masking
+        mask_grid(highResGrid, coarseGrid);
+
+        // write grids
+        coarseGrid->setName("Coarse");
+        highResGrid->setName("High");
+
+        openvdb::GridPtrVec to_save;
+        to_save.push_back(coarseGrid);
+        to_save.push_back(highResGrid);
+
+        openvdb::io::File file("test.vdb");
+        file.write(to_save);
+        file.close();
+
+        return EXIT_SUCCESS;
+    }
+#endif
+
     std::string source_plt = toml::find<std::string>(c.root, "input");
     std::string dest_vdb   = toml::find<std::string>(c.root, "output");
 
@@ -546,29 +559,47 @@ int amr_to_volume_sets(Arguments const& c) {
     for (auto& sampled_grid : loaded_amr_grids.grids) {
         // check if there is a per-variable override
 
-        if (sampled_grid.multi_grid) {
+        if (!sampled_grid.multi_grid) {
+            spdlog::error("No grids!");
+            return EXIT_FAILURE;
+        }
 
-            auto multi = sampled_grid.multi_grid;
+        auto multi = sampled_grid.multi_grid;
 
-            auto max_levels = multi->numLevels();
+        auto max_levels = multi->numLevels();
 
-            if (max_levels < 1) {
-                spdlog::error("Unable to handle zero sized levels!");
-                exit(1);
-            }
+        if (max_levels < 1) {
+            spdlog::error("Unable to handle zero sized levels!");
+            exit(1);
+        }
 
-            // remember that levels are inverted. the higher you go, the coarser
-            // we want to mask coarser with finer
-            // now this means we want to process things in a certain order.
+        // remember that levels are inverted. the higher you go, the coarser
+        // we want to mask coarser with finer
+        // now this means we want to process things in a certain order.
 
-            for (int level_i = max_levels - 1; level_i >= 0; --level_i) {
-                auto this_grid = multi->grid(level_i);
-                auto name = sampled_grid.name + "_" + std::to_string(level_i);
+        for (int level_i = max_levels - 1; level_i >= 0; --level_i) {
+            auto this_grid = multi->grid(level_i);
+            auto name      = sampled_grid.name + "_" + std::to_string(level_i);
+
+            auto bb = this_grid->evalActiveVoxelBoundingBox();
+
+            spdlog::info("Creating grid {} with {}: {} {} {} - {} {} {}",
+                         name,
+                         this_grid->activeVoxelCount(),
+                         bb.min().x(),
+                         bb.min().y(),
+                         bb.min().z(),
+                         bb.max().x(),
+                         bb.max().y(),
+                         bb.max().z());
+
+            if (level_i != 0) {
+                mask_grid(multi->grid(level_i - 1), this_grid);
 
                 auto bb = this_grid->evalActiveVoxelBoundingBox();
 
-                spdlog::info("Creating grid {} with {}: {} {} {} - {} {} {}",
-                             name,
+                spdlog::info("Masked {} to: {} {} {} - {} {} {}",
+                             this_grid->evalActiveVoxelBoundingBox(),
                              this_grid->activeVoxelCount(),
                              bb.min().x(),
                              bb.min().y(),
@@ -576,35 +607,14 @@ int amr_to_volume_sets(Arguments const& c) {
                              bb.max().x(),
                              bb.max().y(),
                              bb.max().z());
-
-                if (level_i != 0) {
-                    mask_grid(multi->grid(level_i - 1), this_grid);
-
-                    auto bb = this_grid->evalActiveVoxelBoundingBox();
-
-                    spdlog::info("Masked {} to: {} {} {} - {} {} {}",
-                                 this_grid->evalActiveVoxelBoundingBox(),
-                                 this_grid->activeVoxelCount(),
-                                 bb.min().x(),
-                                 bb.min().y(),
-                                 bb.min().z(),
-                                 bb.max().x(),
-                                 bb.max().y(),
-                                 bb.max().z());
-                }
-
-                this_grid->setName(name);
-
-                completed[name] = this_grid;
             }
 
-            sampled_grid.multi_grid.reset(); // try to minimize mem usage
+            this_grid->setName(name);
+
+            completed[name] = this_grid;
         }
 
-        if (sampled_grid.plain_grid) {
-            sampled_grid.plain_grid->setName(sampled_grid.name);
-            completed[sampled_grid.name] = sampled_grid.plain_grid;
-        }
+        sampled_grid.multi_grid.reset(); // try to minimize mem usage
     }
 
     if (c.root.contains("post")) { postprocess(c.root, completed); }
