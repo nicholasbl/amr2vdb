@@ -258,6 +258,9 @@ PltFileReader::PltFileReader(std::string a_pltFile)
     }
     spdlog::info("Reading native directory format");
 
+    VisMF::Initialize();
+    VisMF::SetVerbose(1);
+
     // Get the plt metadata and resize part of the data vectors
     const std::string pltFileHeader(m_pltFile + "/Header");
     readGenericPlotfileHeader(pltFileHeader);
@@ -367,17 +370,18 @@ void PltFileReader::readGenericPlotfileHeader(
 
     // Populate the geometry vector, assume no periodicity
     Array<int, AMREX_SPACEDIM> perio({ AMREX_D_DECL(0, 0, 0) });
-    m_geoms[0] = Geometry(Domains[0], rb, coord_sys, perio);
+    // m_geoms[0] = Geometry(Domains[0], rb, coord_sys, perio);
+    m_geoms.at(0) = Geometry(Domains[0], rb, coord_sys, perio);
     for (int lev = 1; lev < m_nlevels; ++lev) {
-        m_geoms[lev] = refine(m_geoms[lev - 1], m_refRatio[lev - 1]);
+        m_geoms.at(lev) = refine(m_geoms.at(lev - 1), m_refRatio.at(lev - 1));
     }
 }
 
 void PltFileReader::readPlotFileMetaData() {
     // Set BoxArray, DistMap on each level
     for (int lev = 0; lev < m_nlevels; ++lev) {
-        readLevelBoxArray(lev, m_grids[lev]);
-        m_dmaps[lev] = DistributionMapping(m_grids[lev]);
+        readLevelBoxArray(lev, m_grids.at(lev));
+        m_dmaps.at(lev) = DistributionMapping(m_grids.at(lev));
     }
 }
 
@@ -386,9 +390,9 @@ void PltFileReader::readPlotFileData() {
     // Load the actual data
     // TODO: only load a subset of the pltfile variables
     for (int lev = 0; lev < m_nlevels; ++lev) {
-        m_data[lev].define(m_grids[lev], m_dmaps[lev], m_nvars, 0);
+        m_data.at(lev).define(m_grids.at(lev), m_dmaps.at(lev), m_nvars, 0);
         VisMF::Read(
-            m_data[lev],
+            m_data.at(lev),
             MultiFabFileFullPrefix(lev, m_pltFile, level_prefix, "Cell"));
     }
 

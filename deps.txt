@@ -77,7 +77,7 @@ options+!arm64 :
 
 - amrex
 type : cmake
-src : https://github.com/AMReX-Codes/amrex/releases/download/23.08/amrex-23.08.tar.gz
+src : https://github.com/AMReX-Codes/amrex/releases/download/25.07/amrex-25.07.tar.gz 
 options :
     AMReX_BUILD_SHARED_LIBS OFF
     AMReX_SPACEDIM 3

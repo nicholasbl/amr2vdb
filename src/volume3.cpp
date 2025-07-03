@@ -554,13 +554,16 @@ int amr_to_volume_sets(Arguments const& c) {
 
     auto loaded_amr_grids = load_file(source_plt, config);
 
+    spdlog::info("Read: {}", loaded_amr_grids.grids.size());
+
     GridMap completed;
 
     for (auto& sampled_grid : loaded_amr_grids.grids) {
 
         if (!sampled_grid.multi_grid) {
             spdlog::error("No grids for {}", sampled_grid.name);
-            continue;
+            spdlog::error("Details: {}", loaded_amr_grids.grids.size());
+            return EXIT_FAILURE;
         }
 
         auto multi = sampled_grid.multi_grid;
