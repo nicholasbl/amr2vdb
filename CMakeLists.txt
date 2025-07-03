@@ -62,8 +62,8 @@ else ()
 endif ()
 
 if  (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    target_compile_options(amr2vdb PUBLIC -fsanitize=address)
-    target_link_options(amr2vdb PUBLIC  -fsanitize=address)
+    target_compile_options(amr2vdb PUBLIC -fsanitize=address,undefined)
+    target_link_options(amr2vdb PUBLIC  -fsanitize=address,undefined)
 endif()
 
 # Source Files =================================================================
