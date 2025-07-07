@@ -417,31 +417,47 @@ static Result load_file(std::filesystem::path path, VolumeConfig const& c) {
 
 static void mask_grid(FloatGridPtr mask_grid, FloatGridPtr to_mask) {
     // make a mask
-    auto mask = openvdb::FloatGrid::create(1.0f);
+    auto mask = openvdb::BoolGrid::create(false);
     mask->setTransform(mask_grid->transform().copy());
     mask->setGridClass(openvdb::GRID_FOG_VOLUME);
 
     {
         auto accessor = mask->getAccessor();
         for (auto iter = mask_grid->cbeginValueOn(); iter; ++iter) {
-            accessor.setValue(iter.getCoord(), 0.0f);
+            accessor.setValue(iter.getCoord(), true);
         }
     }
 
     mask->pruneGrid();
 
-    // mask->setName("mask");
-    // openvdb::io::File("mask_before.vdb").write({ mask });
 
-    auto resampled_mask = openvdb::FloatGrid::create(1.0f);
+    auto resampled_mask = openvdb::BoolGrid::create(false);
     resampled_mask->setTransform(to_mask->transform().copy());
     openvdb::tools::resampleToMatch<openvdb::tools::PointSampler>(
         *mask, *resampled_mask);
 
-    // resampled_mask->setName("mask");
-    // openvdb::io::File("mask_after.vdb").write({ resampled_mask });
+    // save some memory
+    mask->clear();
 
-    openvdb::tools::compMul(*to_mask, *resampled_mask);
+    // have the same transforms, so coords line up
+    auto mask_accessor = resampled_mask->getAccessor();
+
+    auto accessor = to_mask->getAccessor();
+    for (auto iter = resampled_mask->cbeginValueOn(); iter.test(); ++iter) {
+        auto mask_value = iter.getValue();
+        auto mask_coord = iter.getCoord();
+
+        // if (iter.getValue() == 0.0f) { accessor.setValueOff(iter.getCoord());
+        // }
+
+        if (mask_value) { accessor.setValueOff(mask_coord); }
+    }
+
+    // openvdb::tools::compMul(*to_mask, *resampled_mask);
+
+
+    // Deactivate voxels
+
 
     to_mask->pruneGrid(0.0);
 }
