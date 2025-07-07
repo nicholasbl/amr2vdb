@@ -453,7 +453,10 @@ static void mask_grid(FloatGridPtr mask_grid, FloatGridPtr to_mask) {
         auto mask_coord = iter.getCoord();
 
 
-        if (mask_value) { accessor.setValueOff(mask_coord); }
+        if (mask_value) {
+            accessor.setValue(mask_coord, 0.0);
+            accessor.setValueOff(mask_coord);
+        }
     }
 
     // openvdb::tools::compMul(*to_mask, *resampled_mask);
