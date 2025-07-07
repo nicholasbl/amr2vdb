@@ -430,10 +430,6 @@ static void mask_grid(FloatGridPtr mask_grid, FloatGridPtr to_mask) {
 
     mask->pruneGrid();
 
-    int erosion_voxels = 1; // adjust as needed
-    openvdb::tools::erodeActiveValues(mask->tree(), erosion_voxels);
-
-
     auto resampled_mask = openvdb::BoolGrid::create(false);
     resampled_mask->setTransform(to_mask->transform().copy());
     openvdb::tools::resampleToMatch<openvdb::tools::BoxSampler>(
@@ -441,6 +437,9 @@ static void mask_grid(FloatGridPtr mask_grid, FloatGridPtr to_mask) {
 
     // save some memory
     mask->clear();
+
+    int erosion_voxels = 2;
+    openvdb::tools::erodeActiveValues(resampled_mask->tree(), erosion_voxels);
 
     // have the same transforms, so coords line up
     auto mask_accessor = resampled_mask->getAccessor();
