@@ -436,7 +436,7 @@ static void mask_grid(FloatGridPtr mask_grid, FloatGridPtr to_mask) {
 
     auto resampled_mask = openvdb::BoolGrid::create(false);
     resampled_mask->setTransform(to_mask->transform().copy());
-    openvdb::tools::resampleToMatch<openvdb::tools::PointSampler>(
+    openvdb::tools::resampleToMatch<openvdb::tools::NearestNeighbors>(
         *mask, *resampled_mask);
 
     // save some memory
