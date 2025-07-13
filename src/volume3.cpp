@@ -2,10 +2,8 @@
 
 #include "amr_common.h"
 #include "argparse.h"
-#include "lzs3d.h"
 #include "pltfilereader.h"
 #include "postprocess.h"
-#include "tricubic.h"
 
 #include "spdlog/spdlog.h"
 
@@ -26,8 +24,10 @@
 #include <array>
 #include <span>
 
+namespace {
 // IMPROVEMENTS:
 // Extract levels in parallel. We are almost idle on IO.
+
 
 /// This is a single quantity
 struct SampledGrid {
@@ -35,7 +35,7 @@ struct SampledGrid {
     FloatMultiGridPtr multi_grid = nullptr;
 };
 
-/// Extraction result
+/// Extraction result. WE NEED TO CLEAN THIS ALL UP
 struct Result {
     openvdb::BBoxd           bbox;
     std::vector<SampledGrid> grids;
@@ -65,7 +65,7 @@ static void loop_box(amrex::Box const&                       bx,
 
                 if (!keep.isInside(openvdb::Coord(i, j, k))) continue;
 
-                for (int offset = 0; offset < var_indices.size(); offset++) {
+                for (size_t offset = 0; offset < var_indices.size(); offset++) {
                     auto index = var_indices[offset];
 
                     float value = *a.ptr(i, j, k, index);
@@ -122,7 +122,7 @@ static void loop_box_constant(amrex::Box const&             bx,
 ///
 /// The ConversionState class models the settings and state for a conversion
 ///
-struct ConversionState {
+struct ConversionStateVS {
     VolumeConfig config;
 
     std::unique_ptr<PltFileReader> plt_data;
@@ -132,7 +132,7 @@ struct ConversionState {
     /// Corresponding variable ids in the AMR
     std::vector<int> var_ids;
 
-    ConversionState(VolumeConfig c) : config(c) { }
+    ConversionStateVS(VolumeConfig c) : config(c) { }
 
     ///
     /// Attempt to load an AMR file
@@ -195,6 +195,7 @@ struct ConversionState {
         return true;
     }
 
+
     void extract_level(int                     current_level,
                        std::span<FloatGridPtr> per_var_grid) const {
 
@@ -208,12 +209,11 @@ struct ConversionState {
             per_var_accessor.push_back(mg->getAccessor());
         }
 
-        auto const& ba = plt_data->getGrid(current_level);
+        // auto const& ba = plt_data->getGrid(current_level);
 
         auto const& mf = plt_data->get_data(current_level);
 
         // We can now iterate the AMR at this level
-        auto iter = amrex::MFIter(mf);
 
         spdlog::debug("Iterating blocks for {}", current_level);
 
@@ -238,8 +238,7 @@ struct ConversionState {
                       level_bb.max().y(),
                       level_bb.max().z());
 
-
-        for (; iter.isValid(); ++iter) {
+        for (auto iter = amrex::MFIter(mf); iter.isValid(); ++iter) {
             auto const& box = iter.validbox();
 
             amrex::FArrayBox const& fab = mf[iter];
@@ -283,7 +282,9 @@ struct ConversionState {
         // note the <= here
         for (int current_level = 0; current_level <= config.max_level;
              current_level++) {
-            spdlog::info("Working on AMR level {}", current_level);
+            spdlog::info("Working on AMR level: {} (config.max_level = {})",
+                         current_level,
+                         config.max_level);
             // also note that VDB does inverse resolution order. 0 is the
             // finest. so we want to map, say 3 -> 0 and 0 -> 3
             size_t vdb_mapped_level = (config.max_level - current_level);
@@ -303,7 +304,9 @@ struct ConversionState {
         // Transform output a bit to simplify things
         std::vector<SampledGrid> ret_grid;
 
-        for (int i = 0; i < per_var_multivdb_grids.size(); i++) {
+        spdlog::info("Sampling complete: here");
+
+        for (size_t i = 0; i < per_var_multivdb_grids.size(); i++) {
             ret_grid.emplace_back(SampledGrid {
                 .name       = var_names[i],
                 .multi_grid = per_var_multivdb_grids[i],
@@ -336,7 +339,7 @@ struct ConversionState {
 
         for (int current_level = 0; current_level <= config.max_level;
              current_level++) {
-            spdlog::info("Working on AMR level {}", current_level);
+            spdlog::info("Working on AMR only level {}", current_level);
 
             size_t vdb_mapped_level = (config.max_level - current_level);
 
@@ -345,7 +348,7 @@ struct ConversionState {
             FloatGridPtr        per_var_grid     = g->grid(vdb_mapped_level);
             FloatGrid::Accessor per_var_accessor = per_var_grid->getAccessor();
 
-            auto const& ba = plt_data->getGrid(current_level);
+            // auto const& ba = plt_data->getGrid(current_level);
 
             auto const& mf = plt_data->get_data(current_level);
 
@@ -356,9 +359,9 @@ struct ConversionState {
             for (; iter.isValid(); ++iter) {
                 auto const& box = iter.validbox();
 
-                amrex::FArrayBox const& fab = mf[iter];
+                // amrex::FArrayBox const& fab = mf[iter];
 
-                auto const& a = fab.array();
+                // auto const& a = fab.array();
 
                 loop_box_constant(box, vdb_mapped_level + 1, per_var_accessor);
             }
@@ -377,9 +380,9 @@ struct ConversionState {
 /// Wrapper function to pull in a PLT file
 ///
 static Result load_file(std::filesystem::path path, VolumeConfig const& c) {
-    auto state = AMRState();
+    auto amr_state = AMRState();
 
-    auto c_state = ConversionState(c);
+    auto c_state = ConversionStateVS(c);
 
     if (!c_state.init(path)) { return {}; }
 
@@ -463,77 +466,10 @@ static void mask_grid(FloatGridPtr mask_grid, FloatGridPtr to_mask) {
     to_mask->pruneGrid(0.0);
 }
 
-// Create a sphere SDF as test data
-FloatGridPtr
-createSphere(float radius, openvdb::Vec3f center, float voxelSize) {
-    auto grid      = openvdb::FloatGrid::create(0);
-    auto transform = openvdb::math::Transform::createLinearTransform(voxelSize);
-    grid->setTransform(transform);
-
-    int  dim = static_cast<int>(radius * 2.2f / voxelSize);
-    auto lo  = openvdb::Coord(-dim, -dim, -dim);
-    auto hi  = openvdb::Coord(dim, dim, dim);
-
-    auto accessor = openvdb::FloatGrid::Accessor(grid->tree());
-
-    spdlog::info(
-        "{} {} {} < {} {} {}", lo.x(), lo.y(), lo.z(), hi.x(), hi.y(), hi.z());
-
-    for (int k = lo.z(); k <= hi.z(); ++k) {
-        for (int j = lo.y(); j <= hi.y(); ++j) {
-            for (int i = lo.x(); i <= hi.x(); ++i) {
-                openvdb::Coord ijk(i, j, k);
-                openvdb::Vec3d pos = transform->indexToWorld(ijk);
-
-                double dist = (pos - center).length();
-                if (dist < radius) { accessor.setValue(ijk, 1.0); }
-            }
-        }
-    }
-
-    // grid->pruneGrid();
-
-    grid->setGridClass(openvdb::GRID_FOG_VOLUME);
-    return grid;
-}
+} // namespace
 
 int amr_to_volume_sets(Arguments const& c) {
     spdlog::info("Using volume sets");
-
-#if 0
-    {
-        spdlog::info("Testing...");
-
-        // Create a coarse sphere
-        auto coarseGrid = createSphere(
-            /*radius=*/50.0f,
-            openvdb::Vec3f(0, 0, 0),
-            /*voxelSize=*/1.0f);
-
-        // Create a high-res sphere overlapping partially
-        auto highResGrid = createSphere(
-            /*radius=*/20.0f,
-            openvdb::Vec3f(10, 0, 0),
-            /*voxelSize=*/0.5f);
-
-        // Apply your masking
-        mask_grid(highResGrid, coarseGrid);
-
-        // write grids
-        coarseGrid->setName("Coarse");
-        highResGrid->setName("High");
-
-        openvdb::GridPtrVec to_save;
-        to_save.push_back(coarseGrid);
-        to_save.push_back(highResGrid);
-
-        openvdb::io::File file("test.vdb");
-        file.write(to_save);
-        file.close();
-
-        return EXIT_SUCCESS;
-    }
-#endif
 
     std::string source_plt = toml::find<std::string>(c.root, "input");
     std::string dest_vdb   = toml::find<std::string>(c.root, "output");

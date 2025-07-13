@@ -258,9 +258,6 @@ PltFileReader::PltFileReader(std::string a_pltFile)
     }
     spdlog::info("Reading native directory format");
 
-    VisMF::Initialize();
-    VisMF::SetVerbose(1);
-
     // Get the plt metadata and resize part of the data vectors
     const std::string pltFileHeader(m_pltFile + "/Header");
     readGenericPlotfileHeader(pltFileHeader);
@@ -318,15 +315,16 @@ void PltFileReader::readGenericPlotfileHeader(
     m_refRatio.resize(m_nlevels - 1);
 
     // Level 0 geometry
-    Real prob_lo[AMREX_SPACEDIM];
-    Real prob_hi[AMREX_SPACEDIM];
+    std::array<Real, AMREX_SPACEDIM> prob_lo;
+    std::array<Real, AMREX_SPACEDIM> prob_hi;
+
     // Low coordinates of domain bounding box
     std::getline(is, line);
     {
         std::istringstream lis(line);
         int                i = 0;
         while (lis >> word) {
-            prob_lo[i++] = std::stod(word);
+            prob_lo.at(i++) = std::stod(word);
         }
     }
 
@@ -336,7 +334,7 @@ void PltFileReader::readGenericPlotfileHeader(
         std::istringstream lis(line);
         int                i = 0;
         while (lis >> word) {
-            prob_hi[i++] = std::stod(word);
+            prob_hi.at(i++) = std::stod(word);
         }
     }
 
@@ -348,14 +346,14 @@ void PltFileReader::readGenericPlotfileHeader(
         std::istringstream lis(line);
         int                i = 0;
         while (lis >> word) {
-            m_refRatio[i++] = std::stoi(word);
+            m_refRatio.at(i++) = std::stoi(word);
         }
     }
 
     // Get levels Domains
     Vector<Box> Domains(m_nlevels);
     for (int lev = 0; lev < m_nlevels; ++lev) {
-        is >> Domains[lev];
+        is >> Domains.at(lev);
     }
     GotoNextLine(is);
     GotoNextLine(is); // Skip nsteps line
@@ -370,8 +368,8 @@ void PltFileReader::readGenericPlotfileHeader(
 
     // Populate the geometry vector, assume no periodicity
     Array<int, AMREX_SPACEDIM> perio({ AMREX_D_DECL(0, 0, 0) });
-    // m_geoms[0] = Geometry(Domains[0], rb, coord_sys, perio);
-    m_geoms.at(0) = Geometry(Domains[0], rb, coord_sys, perio);
+
+    m_geoms.at(0) = Geometry(Domains.at(0), rb, coord_sys, perio);
     for (int lev = 1; lev < m_nlevels; ++lev) {
         m_geoms.at(lev) = refine(m_geoms.at(lev - 1), m_refRatio.at(lev - 1));
     }

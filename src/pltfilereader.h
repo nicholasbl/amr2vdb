@@ -44,8 +44,8 @@ public:
     amrex::Vector<std::string> getVariableList() { return m_vars; }
     int                        getNlev() const { return m_nlevels; }
     amrex::Real                getTime() const { return m_time; }
-    const amrex::BoxArray&     getGrid(int a_lev) { return m_grids[a_lev]; }
-    const amrex::Geometry&     getGeom(int a_lev) { return m_geoms[a_lev]; }
+    const amrex::BoxArray&     getGrid(int a_lev) { return m_grids.at(a_lev); }
+    const amrex::Geometry&     getGeom(int a_lev) { return m_geoms.at(a_lev); }
 
 
     /// Obtain the list of multifabs, to be indexed by refinement level

@@ -13,11 +13,13 @@
 
 #include <optional>
 
-
+namespace {
 struct Result {
     // openvdb::BBoxd           bbox;
     openvdb::GridPtrVec grids;
 };
+} // namespace
+
 
 static void loop_box(amrex::Box const&                       bx,
                      amrex::Array4<amrex::Real const> const& a,

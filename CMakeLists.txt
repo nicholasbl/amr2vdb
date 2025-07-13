@@ -16,16 +16,16 @@ project(
     LANGUAGES C CXX
 )
 
-# Depends ======================================================================
-
-include(cmake/CPM.cmake)
-
-# IDE helpers
-CPMAddPackage(
-  NAME GroupSourcesByFolder.cmake
-  GITHUB_REPOSITORY TheLartians/GroupSourcesByFolder.cmake
-  VERSION 1.0
+# Enforce One Definition Rule safety and better diagnostics
+add_compile_options(
+    -fno-common
+    -Wall -Wextra -Wpedantic
+    -Werror=return-type
 )
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    add_compile_options(-Wodr)
+endif()
 
 # Create BIN ===============================================================
 
@@ -61,22 +61,22 @@ else ()
     set (X86 FALSE)
 endif ()
 
-if  (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    target_compile_options(amr2vdb PUBLIC -fsanitize=address,undefined)
-    target_link_options(amr2vdb PUBLIC  -fsanitize=address,undefined)
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    message(STATUS "Enabling AddressSanitizer")
+    target_compile_options(amr2vdb PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(amr2vdb PUBLIC  -fsanitize=address,undefined -fno-omit-frame-pointer)
 endif()
 
 # Source Files =================================================================
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
-target_include_directories(amr2vdb PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(amr2vdb PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
 target_include_directories(amr2vdb PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/include/)
 
 # Link Deps ====================================================================
 
 find_package(AMReX REQUIRED)
-#find_package(PelePhysics REQUIRED)
 
 list(PREPEND CMAKE_MODULE_PATH "${THIRD_PARTY_DIR}/lib/cmake/OpenVDB/")
 list(PREPEND CMAKE_MODULE_PATH "${THIRD_PARTY_DIR}/lib64/cmake/OpenVDB/")
@@ -110,12 +110,12 @@ set(THIRD_PARTY_LIB_DIR "${THIRD_PARTY_DIR}/lib")
 set(THIRD_PARTY_PLUGIN_DIR "${THIRD_PARTY_DIR}/plugin")
 
 file(GLOB_RECURSE THIRD_PARTY_LIBS
-    "${THIRD_PARTY_LIB_DIR}/*.so"
+    "${THIRD_PARTY_LIB_DIR}/*.so*"
     "${THIRD_PARTY_LIB_DIR}/*.dylib"
 )
 
 file(GLOB_RECURSE THIRD_PARTY_PLUGINS
-    "${THIRD_PARTY_PLUGIN_DIR}/*.so"
+    "${THIRD_PARTY_PLUGIN_DIR}/*.so*"
     "${THIRD_PARTY_PLUGIN_DIR}/*.dylib"
 )
 

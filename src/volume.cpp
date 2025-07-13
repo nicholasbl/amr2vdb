@@ -24,6 +24,8 @@
 #include <array>
 #include <span>
 
+namespace {
+
 // IMPROVEMENTS:
 // Extract levels in parallel. We are almost idle on IO.
 
@@ -604,6 +606,8 @@ FloatGridPtr resample(SampledGrid    source,
 
     return ret_grid;
 }
+
+} // namespace
 
 int amr_to_volume(Arguments const& c) {
     std::string source_plt = toml::find<std::string>(c.root, "input");
